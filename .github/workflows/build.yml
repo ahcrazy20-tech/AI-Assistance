@@ -106,7 +106,7 @@ jobs:
 
           // MARK: - Models
 
-          enum ProviderID: String, CaseIterable, Identifiable, Codable {
+          enum ProviderID: String, CaseIterable, Identifiable, Codable, Hashable {
               case auto, gemini, groq, openRouter, siliconFlow, custom
 
               var id: String { rawValue }
@@ -225,6 +225,33 @@ jobs:
 
           // MARK: - App state
 
+          enum AppTab: Int, CaseIterable, Identifiable, Hashable {
+              case chat, files, images, settings
+
+              var id: Int { rawValue }
+              var title: String {
+                  switch self {
+                  case .chat: return "Chat / المحادثة"
+                  case .files: return "Files / الملفات"
+                  case .images: return "Images / الصور"
+                  case .settings: return "Settings / الإعدادات"
+                  }
+              }
+              var icon: String {
+                  switch self {
+                  case .chat: return "message.fill"
+                  case .files: return "doc.text.fill"
+                  case .images: return "photo.fill.on.rectangle.fill"
+                  case .settings: return "gearshape.fill"
+                  }
+              }
+          }
+
+          @MainActor
+          final class NavigationState: ObservableObject {
+              @Published var selectedTab: AppTab = .chat
+          }
+
           @MainActor
           final class AppSettings: ObservableObject {
               private let defaults = UserDefaults.standard
@@ -239,22 +266,40 @@ jobs:
               @Published var imageModel: String { didSet { defaults.set(imageModel, forKey: "imageModel") } }
               @Published var imageEditModel: String { didSet { defaults.set(imageEditModel, forKey: "imageEditModel") } }
               @Published var systemPrompt: String { didSet { defaults.set(systemPrompt, forKey: "systemPrompt") } }
-              @Published var localDailyLimit: Int { didSet { defaults.set(localDailyLimit, forKey: "localDailyLimit") } }
+
+              @Published var geminiDailyLimit: Int { didSet { defaults.set(geminiDailyLimit, forKey: "geminiDailyLimit") } }
+              @Published var groqDailyLimit: Int { didSet { defaults.set(groqDailyLimit, forKey: "groqDailyLimit") } }
+              @Published var openRouterDailyLimit: Int { didSet { defaults.set(openRouterDailyLimit, forKey: "openRouterDailyLimit") } }
+              @Published var siliconDailyLimit: Int { didSet { defaults.set(siliconDailyLimit, forKey: "siliconDailyLimit") } }
+              @Published var customDailyLimit: Int { didSet { defaults.set(customDailyLimit, forKey: "customDailyLimit") } }
+              @Published var pollinationsDailyLimit: Int { didSet { defaults.set(pollinationsDailyLimit, forKey: "pollinationsDailyLimit") } }
               @Published private(set) var keyRevision = 0
 
               init() {
-                  selectedProvider = ProviderID(rawValue: defaults.string(forKey: "selectedProvider") ?? "auto") ?? .auto
-                  geminiModel = defaults.string(forKey: "geminiModel") ?? "gemini-3.7-flash"
-                  groqModel = defaults.string(forKey: "groqModel") ?? "qwen/qwen3.6-27b"
-                  openRouterModel = defaults.string(forKey: "openRouterModel") ?? "openrouter/free"
-                  siliconModel = defaults.string(forKey: "siliconModel") ?? "Qwen/Qwen3-8B"
-                  customModel = defaults.string(forKey: "customModel") ?? ""
-                  customBaseURL = defaults.string(forKey: "customBaseURL") ?? "https://api.example.com/v1"
-                  imageModel = defaults.string(forKey: "imageModel") ?? "zimage"
-                  imageEditModel = defaults.string(forKey: "imageEditModel") ?? "kontext"
-                  systemPrompt = defaults.string(forKey: "systemPrompt") ?? "You are a powerful personal AI assistant. Answer accurately in the user's language. When a document is attached, analyze only the supplied content and clearly state uncertainty."
-                  let storedLimit = defaults.integer(forKey: "localDailyLimit")
-                  localDailyLimit = storedLimit == 0 ? 200 : storedLimit
+                  let store = UserDefaults.standard
+                  selectedProvider = ProviderID(rawValue: store.string(forKey: "selectedProvider") ?? "auto") ?? .auto
+                  geminiModel = store.string(forKey: "geminiModel") ?? "gemini-3.7-flash"
+                  groqModel = store.string(forKey: "groqModel") ?? "qwen/qwen3.6-27b"
+                  openRouterModel = store.string(forKey: "openRouterModel") ?? "openrouter/free"
+                  siliconModel = store.string(forKey: "siliconModel") ?? "Qwen/Qwen3-8B"
+                  customModel = store.string(forKey: "customModel") ?? ""
+                  customBaseURL = store.string(forKey: "customBaseURL") ?? "https://api.example.com/v1"
+                  imageModel = store.string(forKey: "imageModel") ?? "zimage"
+                  imageEditModel = store.string(forKey: "imageEditModel") ?? "kontext"
+                  systemPrompt = store.string(forKey: "systemPrompt") ?? "You are a powerful personal AI assistant. Answer accurately in the user's language. When a document is attached, analyze only the supplied content and clearly state uncertainty."
+
+                  let gemini = store.integer(forKey: "geminiDailyLimit")
+                  let groq = store.integer(forKey: "groqDailyLimit")
+                  let openRouter = store.integer(forKey: "openRouterDailyLimit")
+                  let silicon = store.integer(forKey: "siliconDailyLimit")
+                  let custom = store.integer(forKey: "customDailyLimit")
+                  let pollinations = store.integer(forKey: "pollinationsDailyLimit")
+                  geminiDailyLimit = gemini == 0 ? 250 : gemini
+                  groqDailyLimit = groq == 0 ? 1000 : groq
+                  openRouterDailyLimit = openRouter == 0 ? 50 : openRouter
+                  siliconDailyLimit = silicon == 0 ? 200 : silicon
+                  customDailyLimit = custom == 0 ? 200 : custom
+                  pollinationsDailyLimit = pollinations == 0 ? 25 : pollinations
               }
 
               func key(for provider: ProviderID) -> String {
@@ -291,6 +336,17 @@ jobs:
                   case .siliconFlow: return "https://api.siliconflow.com/v1"
                   case .custom: return customBaseURL
                   default: return ""
+                  }
+              }
+
+              func dailyLimit(for provider: ProviderID) -> Int {
+                  switch provider {
+                  case .gemini: return geminiDailyLimit
+                  case .groq: return groqDailyLimit
+                  case .openRouter: return openRouterDailyLimit
+                  case .siliconFlow: return siliconDailyLimit
+                  case .custom: return customDailyLimit
+                  case .auto: return 0
                   }
               }
           }
@@ -358,9 +414,23 @@ jobs:
                   total = byProvider.values.reduce(0, +)
               }
 
-              func canSend(limit: Int) -> Bool {
+              func count(for provider: ProviderID) -> Int {
                   refresh()
-                  return limit < 1 || total < limit
+                  return byProvider[provider.rawValue, default: 0]
+              }
+
+              func count(label: String) -> Int {
+                  refresh()
+                  return byProvider[label, default: 0]
+              }
+
+              func canSend(_ provider: ProviderID, settings: AppSettings) -> Bool {
+                  let limit = settings.dailyLimit(for: provider)
+                  return limit < 1 || count(for: provider) < limit
+              }
+
+              func canSend(label: String, limit: Int) -> Bool {
+                  limit < 1 || count(label: label) < limit
               }
 
               func record(_ provider: ProviderID) {
@@ -371,6 +441,17 @@ jobs:
                   refresh()
                   byProvider[label, default: 0] += 1
                   total = byProvider.values.reduce(0, +)
+                  persist()
+              }
+
+              func resetToday() {
+                  byProvider = [:]
+                  total = 0
+                  defaults.set(today, forKey: dayKey)
+                  defaults.removeObject(forKey: countsKey)
+              }
+
+              private func persist() {
                   if let data = try? JSONEncoder().encode(byProvider) {
                       defaults.set(data, forKey: countsKey)
                   }
@@ -389,7 +470,8 @@ jobs:
                   prompt: String,
                   attachment: InputAttachment?,
                   selected: ProviderID,
-                  settings: AppSettings
+                  settings: AppSettings,
+                  allowedProviders: Set<ProviderID>
               ) async throws -> ChatResult {
                   let effectivePrompt = makePrompt(prompt, attachment: attachment)
                   let hasImage = attachment?.imageData != nil
@@ -405,11 +487,16 @@ jobs:
 
                   var failures: [String] = []
                   var attempted = false
+                  var locallyBlocked = false
                   for provider in candidates {
                       let key = settings.key(for: provider)
                       if provider != .custom && key.isEmpty { continue }
                       if provider == .custom && settings.customBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
                       if settings.model(for: provider).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
+                      if !allowedProviders.contains(provider) {
+                          locallyBlocked = true
+                          continue
+                      }
 
                       attempted = true
                       do {
@@ -446,7 +533,10 @@ jobs:
                   }
 
                   if !attempted {
-                      throw ServiceError("Add at least one API key in Settings, and make sure its model name is filled in.")
+                      if locallyBlocked {
+                          throw ServiceError("The local daily limit is reached for every eligible provider. Increase an individual provider limit in Settings or wait until tomorrow.")
+                      }
+                      throw ServiceError("Add at least one valid API key in Settings, and make sure its model name is filled in.")
                   }
                   throw ServiceError("All configured providers failed:\n" + failures.joined(separator: "\n"))
               }
@@ -601,6 +691,138 @@ jobs:
                   if let error = json["error"] as? [String: Any] {
                       return (error["message"] as? String) ?? (error["detail"] as? String)
                   }
+                  return json["message"] as? String
+              }
+          }
+
+          // MARK: - API key validation
+
+          enum KeyCheckState: Equatable {
+              case unknown
+              case checking
+              case valid(String)
+              case invalid(String)
+              case missing
+
+              var title: String {
+                  switch self {
+                  case .unknown: return "Not tested"
+                  case .checking: return "Checking…"
+                  case .valid(let message): return message
+                  case .invalid(let message): return message
+                  case .missing: return "Not configured"
+                  }
+              }
+
+              var icon: String {
+                  switch self {
+                  case .unknown: return "questionmark.circle"
+                  case .checking: return "arrow.triangle.2.circlepath"
+                  case .valid: return "checkmark.seal.fill"
+                  case .invalid: return "xmark.octagon.fill"
+                  case .missing: return "key.slash"
+                  }
+              }
+
+              var color: Color {
+                  switch self {
+                  case .valid: return .green
+                  case .invalid: return .red
+                  case .checking: return .orange
+                  case .unknown, .missing: return .secondary
+                  }
+              }
+          }
+
+          final class KeyValidationService {
+              static let shared = KeyValidationService()
+              private init() {}
+
+              @MainActor
+              func validate(provider: ProviderID, key: String, settings: AppSettings) async -> KeyCheckState {
+                  let cleanKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+                  if cleanKey.isEmpty && provider != .custom { return .missing }
+                  if provider == .custom && (
+                      settings.customModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                      settings.customBaseURL.contains("example.com")
+                  ) { return .missing }
+
+                  let endpoint: String
+                  switch provider {
+                  case .gemini:
+                      endpoint = "https://generativelanguage.googleapis.com/v1beta/models"
+                  case .openRouter:
+                      endpoint = "https://openrouter.ai/api/v1/key"
+                  case .groq, .siliconFlow, .custom:
+                      var base = settings.baseURL(for: provider).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                      if base.hasSuffix("/chat/completions") {
+                          base = String(base.dropLast("/chat/completions".count))
+                      }
+                      if base.hasSuffix("/models") { endpoint = base } else { endpoint = base + "/models" }
+                  case .auto:
+                      return .invalid("Auto is not an API provider")
+                  }
+
+                  guard let url = URL(string: endpoint), url.scheme == "https" else {
+                      return .invalid("Invalid HTTPS endpoint")
+                  }
+                  var request = URLRequest(url: url)
+                  request.httpMethod = "GET"
+                  request.timeoutInterval = 30
+                  request.setValue("application/json", forHTTPHeaderField: "Accept")
+                  if provider == .gemini {
+                      request.setValue(cleanKey, forHTTPHeaderField: "x-goog-api-key")
+                  } else if !cleanKey.isEmpty {
+                      request.setValue("Bearer \(cleanKey)", forHTTPHeaderField: "Authorization")
+                  }
+
+                  do {
+                      let (data, response) = try await URLSession.shared.data(for: request)
+                      guard let http = response as? HTTPURLResponse else { return .invalid("No HTTP response") }
+                      if (200...299).contains(http.statusCode) {
+                          if provider == .openRouter,
+                             let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                             let details = json["data"] as? [String: Any],
+                             let label = details["label"] as? String {
+                              return .valid("Valid key • \(label)")
+                          }
+                          return .valid("Valid key • HTTP \(http.statusCode)")
+                      }
+                      if http.statusCode == 429 {
+                          return .valid("Key accepted • rate limit reached")
+                      }
+                      return .invalid(apiError(from: data) ?? "Rejected • HTTP \(http.statusCode)")
+                  } catch {
+                      return .invalid(error.localizedDescription)
+                  }
+              }
+
+              func validatePollinations(key: String) async -> KeyCheckState {
+                  let cleanKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+                  guard !cleanKey.isEmpty else { return .missing }
+                  guard let url = URL(string: "https://gen.pollinations.ai/account/profile") else {
+                      return .invalid("Invalid endpoint")
+                  }
+                  var request = URLRequest(url: url)
+                  request.timeoutInterval = 30
+                  request.setValue("Bearer \(cleanKey)", forHTTPHeaderField: "Authorization")
+                  do {
+                      let (data, response) = try await URLSession.shared.data(for: request)
+                      guard let http = response as? HTTPURLResponse else { return .invalid("No HTTP response") }
+                      if (200...299).contains(http.statusCode) { return .valid("Valid publishable key") }
+                      if http.statusCode == 429 { return .valid("Key accepted • rate limit reached") }
+                      return .invalid(apiError(from: data) ?? "Rejected • HTTP \(http.statusCode)")
+                  } catch {
+                      return .invalid(error.localizedDescription)
+                  }
+              }
+
+              private func apiError(from data: Data) -> String? {
+                  guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+                      return String(data: data, encoding: .utf8)?.prefix(160).description
+                  }
+                  if let error = json["error"] as? [String: Any] { return error["message"] as? String }
+                  if let error = json["error"] as? String { return error }
                   return json["message"] as? String
               }
           }
@@ -1002,6 +1224,7 @@ jobs:
               @StateObject private var chat = ChatStore()
               @StateObject private var attachment = AttachmentStore()
               @StateObject private var usage = UsageLedger()
+              @StateObject private var navigation = NavigationState()
 
               var body: some Scene {
                   WindowGroup {
@@ -1010,23 +1233,56 @@ jobs:
                           .environmentObject(chat)
                           .environmentObject(attachment)
                           .environmentObject(usage)
+                          .environmentObject(navigation)
                   }
               }
           }
 
+          enum KeyboardController {
+              static func dismiss() {
+                  UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+              }
+          }
+
           struct RootView: View {
+              @EnvironmentObject private var navigation: NavigationState
+
               var body: some View {
-                  TabView {
+                  TabView(selection: $navigation.selectedTab) {
                       ChatView()
-                          .tabItem { Label("Chat", systemImage: "message.fill") }
+                          .tag(AppTab.chat)
+                          .tabItem { Label("Chat", systemImage: AppTab.chat.icon) }
                       FilesView()
-                          .tabItem { Label("Files", systemImage: "doc.text.fill") }
+                          .tag(AppTab.files)
+                          .tabItem { Label("Files", systemImage: AppTab.files.icon) }
                       ImagesView()
-                          .tabItem { Label("Images", systemImage: "photo.fill.on.rectangle.fill") }
+                          .tag(AppTab.images)
+                          .tabItem { Label("Images", systemImage: AppTab.images.icon) }
                       SettingsView()
-                          .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+                          .tag(AppTab.settings)
+                          .tabItem { Label("Settings", systemImage: AppTab.settings.icon) }
                   }
                   .tint(.indigo)
+              }
+          }
+
+          struct TopTabMenu: View {
+              @EnvironmentObject private var navigation: NavigationState
+
+              var body: some View {
+                  Menu {
+                      ForEach(AppTab.allCases) { tab in
+                          Button {
+                              KeyboardController.dismiss()
+                              navigation.selectedTab = tab
+                          } label: {
+                              Label(tab.title, systemImage: tab.icon)
+                          }
+                      }
+                  } label: {
+                      Image(systemName: "square.grid.2x2.fill")
+                  }
+                  .accessibilityLabel("Open navigation menu")
               }
           }
 
@@ -1041,6 +1297,7 @@ jobs:
               @State private var showFileImporter = false
               @State private var errorMessage = ""
               @State private var showError = false
+              @FocusState private var composerFocused: Bool
 
               var body: some View {
                   NavigationStack {
@@ -1061,21 +1318,38 @@ jobs:
                               Spacer()
                           } else {
                               ScrollViewReader { proxy in
-                                  ScrollView {
-                                      LazyVStack(spacing: 12) {
-                                          ForEach(chat.messages) { message in
-                                              MessageBubble(message: message).id(message.id)
-                                          }
-                                          if chat.isSending {
-                                              HStack {
-                                                  ProgressView()
-                                                  Text("Thinking…").foregroundStyle(.secondary)
-                                                  Spacer()
+                                  ZStack(alignment: .bottomTrailing) {
+                                      ScrollView {
+                                          LazyVStack(spacing: 12) {
+                                              ForEach(chat.messages) { message in
+                                                  MessageBubble(message: message).id(message.id)
                                               }
-                                              .padding(.horizontal)
+                                              if chat.isSending {
+                                                  HStack {
+                                                      ProgressView()
+                                                      Text("Thinking…").foregroundStyle(.secondary)
+                                                      Spacer()
+                                                  }
+                                                  .padding(.horizontal)
+                                              }
                                           }
+                                          .padding(.vertical)
                                       }
-                                      .padding(.vertical)
+                                      .scrollDismissesKeyboard(.interactively)
+
+                                      Button {
+                                          if let id = chat.messages.last?.id {
+                                              withAnimation { proxy.scrollTo(id, anchor: .bottom) }
+                                          }
+                                      } label: {
+                                          Image(systemName: "arrow.down.circle.fill")
+                                              .font(.title2)
+                                              .symbolRenderingMode(.palette)
+                                              .foregroundStyle(.white, .indigo)
+                                              .shadow(radius: 3)
+                                      }
+                                      .padding(12)
+                                      .accessibilityLabel("Jump to latest message")
                                   }
                                   .onChange(of: chat.messages.count) { _ in
                                       if let id = chat.messages.last?.id {
@@ -1110,6 +1384,7 @@ jobs:
                                   TextField("Message", text: $input, axis: .vertical)
                                       .lineLimit(1...5)
                                       .textFieldStyle(.roundedBorder)
+                                      .focused($composerFocused)
 
                                   Button(action: send) {
                                       Image(systemName: "arrow.up.circle.fill")
@@ -1118,20 +1393,45 @@ jobs:
                                   .disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || chat.isSending || attachment.isLoading)
                               }
                               HStack {
-                                  Text("\(settings.selectedProvider.shortTitle) • Today \(usage.total)/\(settings.localDailyLimit)")
-                                      .font(.caption2)
-                                      .foregroundStyle(.secondary)
+                                  Menu {
+                                      ForEach(ProviderID.allCases) { provider in
+                                          Button {
+                                              settings.selectedProvider = provider
+                                              composerFocused = false
+                                          } label: {
+                                              if provider == settings.selectedProvider {
+                                                  Label(provider.title, systemImage: "checkmark")
+                                              } else {
+                                                  Text(provider.title)
+                                              }
+                                          }
+                                      }
+                                  } label: {
+                                      Label(settings.selectedProvider.shortTitle, systemImage: "cpu")
+                                          .font(.caption.bold())
+                                  }
                                   Spacer()
+                                  Button("Hide keyboard") { composerFocused = false }
+                                      .font(.caption2)
                               }
+                              ProviderUsageStrip()
                           }
                           .padding(10)
                           .background(.ultraThinMaterial)
                       }
                       .navigationTitle("Chat / المحادثة")
                       .toolbar {
+                          ToolbarItem(placement: .navigationBarLeading) { TopTabMenu() }
                           ToolbarItem(placement: .navigationBarTrailing) {
                               Button(role: .destructive) { chat.clear() } label: { Image(systemName: "trash") }
                                   .disabled(chat.messages.isEmpty)
+                          }
+                          ToolbarItemGroup(placement: .keyboard) {
+                              Button { attachment.current = nil } label: { Label("Remove file", systemImage: "paperclip") }
+                                  .disabled(attachment.current == nil)
+                              Spacer()
+                              Button("Done") { composerFocused = false }
+                                  .fontWeight(.semibold)
                           }
                       }
                   }
@@ -1148,8 +1448,16 @@ jobs:
               private func send() {
                   let prompt = input.trimmingCharacters(in: .whitespacesAndNewlines)
                   guard !prompt.isEmpty else { return }
-                  guard usage.canSend(limit: settings.localDailyLimit) else {
-                      present("Your local daily limit is reached. Change it in Settings or wait until tomorrow.")
+                  let allowedProviders = Set(ProviderID.allCases.filter { provider in
+                      provider != .auto && usage.canSend(provider, settings: settings)
+                  })
+                  if settings.selectedProvider != .auto && !allowedProviders.contains(settings.selectedProvider) {
+                      let provider = settings.selectedProvider
+                      present("The local daily limit for \(provider.shortTitle) is reached (\(usage.count(for: provider))/\(settings.dailyLimit(for: provider))). Change that provider's limit in Settings or use Auto.")
+                      return
+                  }
+                  if settings.selectedProvider == .auto && allowedProviders.isEmpty {
+                      present("All local provider limits are reached. Increase an individual limit in Settings or wait until tomorrow.")
                       return
                   }
                   let history = chat.messages
@@ -1166,7 +1474,8 @@ jobs:
                               prompt: prompt,
                               attachment: currentAttachment,
                               selected: settings.selectedProvider,
-                              settings: settings
+                              settings: settings,
+                              allowedProviders: allowedProviders
                           )
                           chat.messages.append(ChatMessage(role: .assistant, text: result.text, provider: result.provider.shortTitle))
                           usage.record(result.provider)
@@ -1217,7 +1526,16 @@ jobs:
                       VStack(alignment: .leading, spacing: 5) {
                           Text(message.text).textSelection(.enabled)
                           if let provider = message.provider {
-                              Text(provider).font(.caption2).foregroundStyle(.secondary)
+                              HStack {
+                                  Text(provider).font(.caption2).foregroundStyle(.secondary)
+                                  Spacer(minLength: 8)
+                                  Button {
+                                      UIPasteboard.general.string = message.text
+                                  } label: {
+                                      Image(systemName: "doc.on.doc").font(.caption)
+                                  }
+                                  .buttonStyle(.plain)
+                              }
                           }
                       }
                       .padding(12)
@@ -1227,6 +1545,53 @@ jobs:
                       if message.role == .assistant { Spacer(minLength: 45) }
                   }
                   .padding(.horizontal)
+                  .contextMenu {
+                      Button {
+                          UIPasteboard.general.string = message.text
+                      } label: {
+                          Label("Copy", systemImage: "doc.on.doc")
+                      }
+                  }
+              }
+          }
+
+          struct ProviderUsageStrip: View {
+              @EnvironmentObject private var settings: AppSettings
+              @EnvironmentObject private var usage: UsageLedger
+
+              var body: some View {
+                  ScrollView(.horizontal, showsIndicators: false) {
+                      HStack(spacing: 6) {
+                          ForEach(ProviderID.allCases.filter { $0 != .auto }) { provider in
+                              UsageCapsule(
+                                  name: provider.shortTitle,
+                                  used: usage.byProvider[provider.rawValue] ?? 0,
+                                  limit: settings.dailyLimit(for: provider)
+                              )
+                          }
+                          UsageCapsule(
+                              name: "Images",
+                              used: usage.byProvider["pollinations"] ?? 0,
+                              limit: settings.pollinationsDailyLimit
+                          )
+                      }
+                  }
+              }
+          }
+
+          struct UsageCapsule: View {
+              let name: String
+              let used: Int
+              let limit: Int
+
+              var body: some View {
+                  Text("\(name) \(used)/\(limit)")
+                      .font(.caption2.monospacedDigit())
+                      .padding(.horizontal, 8)
+                      .padding(.vertical, 4)
+                      .background(used >= limit ? Color.red.opacity(0.15) : Color.indigo.opacity(0.10))
+                      .foregroundStyle(used >= limit ? .red : .secondary)
+                      .clipShape(Capsule())
               }
           }
 
@@ -1254,6 +1619,7 @@ jobs:
 
           struct FilesView: View {
               @EnvironmentObject private var attachment: AttachmentStore
+              @EnvironmentObject private var navigation: NavigationState
               @State private var showImporter = false
               @State private var previewText = ""
               @State private var fileName = ""
@@ -1297,13 +1663,18 @@ jobs:
                               .background(Color(.secondarySystemBackground))
                               .clipShape(RoundedRectangle(cornerRadius: 14))
                               .padding(.horizontal)
-                              Label("Ready in Chat as the current attachment", systemImage: "checkmark.circle.fill")
-                                  .font(.footnote).foregroundStyle(.green)
-                                  .padding(.bottom)
+                              Button {
+                                  navigation.selectedTab = .chat
+                              } label: {
+                                  Label("Open Chat with this attachment", systemImage: "arrow.right.circle.fill")
+                              }
+                              .buttonStyle(.borderedProminent)
+                              .padding(.bottom)
                           }
                       }
                       .navigationTitle("Files / الملفات")
                       .toolbar {
+                          ToolbarItem(placement: .navigationBarLeading) { TopTabMenu() }
                           ToolbarItem(placement: .navigationBarTrailing) {
                               Button { showImporter = true } label: { Image(systemName: "plus") }
                           }
@@ -1347,6 +1718,7 @@ jobs:
               @State private var errorMessage = ""
               @State private var showError = false
               @State private var shareImage: ShareImage?
+              @FocusState private var imagePromptFocused: Bool
 
               var body: some View {
                   NavigationStack {
@@ -1358,6 +1730,7 @@ jobs:
                                           .font(.headline)
                                       TextField("Example: Replace the sky with a dramatic sunset", text: $prompt, axis: .vertical)
                                           .lineLimit(2...6).textFieldStyle(.roundedBorder)
+                                          .focused($imagePromptFocused)
                                       HStack {
                                           PhotosPicker(selection: $sourceItem, matching: .images) {
                                               Label(sourceImage == nil ? "Choose source" : "Change source", systemImage: "photo")
@@ -1406,7 +1779,16 @@ jobs:
                           }
                           .padding()
                       }
+                      .scrollDismissesKeyboard(.interactively)
                       .navigationTitle("Images / الصور")
+                      .toolbar {
+                          ToolbarItem(placement: .navigationBarLeading) { TopTabMenu() }
+                          ToolbarItemGroup(placement: .keyboard) {
+                              Spacer()
+                              Button("Done") { imagePromptFocused = false }
+                                  .fontWeight(.semibold)
+                          }
+                      }
                   }
                   .onChange(of: sourceItem) { item in loadSource(item) }
                   .sheet(item: $shareImage) { item in ShareSheet(items: [item.image]) }
@@ -1430,8 +1812,8 @@ jobs:
               private func runImageAI() {
                   let clean = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
                   guard !clean.isEmpty else { return }
-                  guard usage.canSend(limit: settings.localDailyLimit) else {
-                      present("Your local daily limit is reached. Change it in Settings or wait until tomorrow.")
+                  guard usage.canSend(label: "pollinations", limit: settings.pollinationsDailyLimit) else {
+                      present("The local Pollinations limit is reached (\(usage.count(label: "pollinations"))/\(settings.pollinationsDailyLimit)). Change it in Settings or wait until tomorrow.")
                       return
                   }
                   isWorking = true
@@ -1484,104 +1866,193 @@ jobs:
               @State private var siliconKey = ""
               @State private var customKey = ""
               @State private var pollinationsKey = ""
+              @State private var checks: [ProviderID: KeyCheckState] = [:]
+              @State private var pollinationsCheck: KeyCheckState = .unknown
               @State private var saved = false
+              @State private var isTestingAll = false
+              @FocusState private var settingsInputFocused: Bool
 
               var body: some View {
                   NavigationStack {
                       Form {
-                          Section("Routing") {
-                              Picker("Provider", selection: $settings.selectedProvider) {
+                          Section("Routing and navigation") {
+                              Picker("Active provider", selection: $settings.selectedProvider) {
                                   ForEach(ProviderID.allCases) { provider in Text(provider.title).tag(provider) }
                               }
-                              Stepper("Local daily cap: \(settings.localDailyLimit)", value: $settings.localDailyLimit, in: 1...5000, step: 25)
-                              LabeledContent("Used today", value: "\(usage.total)")
-                              Text("Auto tries configured providers in order and falls back after quota, capacity, or API errors. This counter is an on-device safety cap; provider quotas are enforced by each service.")
+                              ProviderUsageStrip()
+                              Button(role: .destructive) {
+                                  usage.resetToday()
+                              } label: {
+                                  Label("Reset today's local counters", systemImage: "arrow.counterclockwise")
+                              }
+                              Text("Auto skips providers that reach their individual local limit, then falls back after quota, capacity, or API errors. Use the grid button at the top of every screen to switch tabs even when the keyboard is open.")
                                   .font(.caption).foregroundStyle(.secondary)
                           }
 
                           providerSection(
+                              provider: .gemini,
                               title: "Google Gemini — text + vision",
                               key: $geminiKey,
                               model: $settings.geminiModel,
-                              note: "Gemini 3.7 Flash currently has a free API tier in eligible regions. Exact RPM/RPD varies by model/project. Free-tier prompts may be used to improve Google products."
+                              limit: $settings.geminiDailyLimit,
+                              note: "Gemini 3.7 Flash currently has a free API tier in eligible regions. Live provider quotas can differ from this local safety limit."
                           )
 
                           providerSection(
+                              provider: .groq,
                               title: "Groq — very fast",
                               key: $groqKey,
                               model: $settings.groqModel,
-                              note: "The free plan is rate-limited by model. The default Qwen 3.6 model supports text and up to three images; check your Groq Limits page for the live quota."
+                              limit: $settings.groqDailyLimit,
+                              note: "The default Qwen 3.6 model supports text and images. Check Groq's Limits page for the live account quota."
                           )
 
                           providerSection(
+                              provider: .openRouter,
                               title: "OpenRouter — rotating free models",
                               key: $openRouterKey,
                               model: $settings.openRouterModel,
-                              note: "openrouter/free automatically chooses a compatible free model. New accounts are normally limited across free models; availability and the free roster rotate."
+                              limit: $settings.openRouterDailyLimit,
+                              note: "openrouter/free chooses a compatible free model. The default local cap is 50/day for a fresh free account; your account may differ."
                           )
 
                           providerSection(
+                              provider: .siliconFlow,
                               title: "SiliconFlow / SiliconCloud",
                               key: $siliconKey,
                               model: $settings.siliconModel,
-                              note: "Use a model currently marked $0 in the SiliconFlow console. The default Qwen3-8B is text-only; free models and fixed rate limits can change."
+                              limit: $settings.siliconDailyLimit,
+                              note: "Use a model currently marked $0 in the SiliconFlow console. Free model names and fixed rate limits can change."
                           )
 
                           Section("Pollinations — image generation/editing") {
                               SecureField("Publishable app key (pk_…)", text: $pollinationsKey)
                                   .textInputAutocapitalization(.never).autocorrectionDisabled()
+                                  .focused($settingsInputFocused)
                               TextField("Generation model", text: $settings.imageModel)
                                   .textInputAutocapitalization(.never).autocorrectionDisabled()
+                                  .focused($settingsInputFocused)
                               TextField("Editing model", text: $settings.imageEditModel)
                                   .textInputAutocapitalization(.never).autocorrectionDisabled()
-                              Text("A key may be optional for light image generation, but editing requires a publishable app key and may consume free Pollen/credits. Never put a secret sk_ server key in an iPhone app.")
+                                  .focused($settingsInputFocused)
+                              Stepper(value: $settings.pollinationsDailyLimit, in: 1...5000, step: 5) {
+                                  Text("Local daily limit: \(settings.pollinationsDailyLimit)")
+                              }
+                              LabeledContent("Used today", value: "\(usage.byProvider["pollinations"] ?? 0)")
+                              HStack {
+                                  KeyStatusBadge(state: pollinationsCheck)
+                                  Spacer()
+                                  Button("Test key") { testPollinations() }
+                                      .disabled(pollinationsCheck == .checking)
+                              }
+                              Text("Use only a publishable pk_ key in the iPhone app. Generation/editing can consume free Pollen or the budget attached to that key; never use a secret sk_ server key here.")
                                   .font(.caption).foregroundStyle(.secondary)
                           }
 
                           Section("Custom OpenAI-compatible API") {
-                              TextField("Base URL", text: $settings.customBaseURL)
+                              TextField("HTTPS base URL", text: $settings.customBaseURL)
                                   .textInputAutocapitalization(.never).autocorrectionDisabled()
+                                  .keyboardType(.URL)
+                                  .focused($settingsInputFocused)
                               TextField("Model", text: $settings.customModel)
                                   .textInputAutocapitalization(.never).autocorrectionDisabled()
+                                  .focused($settingsInputFocused)
                               SecureField("API key (optional)", text: $customKey)
                                   .textInputAutocapitalization(.never).autocorrectionDisabled()
+                                  .focused($settingsInputFocused)
+                              Stepper(value: $settings.customDailyLimit, in: 1...20000, step: 25) {
+                                  Text("Local daily limit: \(settings.customDailyLimit)")
+                              }
+                              LabeledContent("Used today", value: "\(usage.byProvider[ProviderID.custom.rawValue] ?? 0)")
+                              HStack {
+                                  KeyStatusBadge(state: state(for: .custom))
+                                  Spacer()
+                                  Button("Test endpoint") { test(provider: .custom, key: customKey) }
+                                      .disabled(state(for: .custom) == .checking)
+                              }
                           }
 
                           Section("Assistant") {
-                              TextField("System prompt", text: $settings.systemPrompt, axis: .vertical).lineLimit(3...9)
+                              TextField("System prompt", text: $settings.systemPrompt, axis: .vertical)
+                                  .lineLimit(3...9)
+                                  .focused($settingsInputFocused)
                           }
 
                           Section {
                               Button {
-                                  saveKeys()
+                                  saveAndTestAll()
                               } label: {
-                                  HStack { Spacer(); Label(saved ? "Saved" : "Save Keys", systemImage: saved ? "checkmark.circle.fill" : "key.fill"); Spacer() }
+                                  HStack {
+                                      Spacer()
+                                      if isTestingAll { ProgressView().padding(.trailing, 4) }
+                                      Label(saved ? "Saved and tested" : "Save & Test All Keys", systemImage: saved ? "checkmark.seal.fill" : "key.viewfinder")
+                                      Spacer()
+                                  }
                               }
+                              .disabled(isTestingAll)
                           } footer: {
-                              Text("Keys are stored in iOS Keychain, not UserDefaults or the build file. Client-side keys are suitable for a personal app only; use your own backend before distributing the app to other people. Free does not mean unlimited, permanent, or private.")
+                              Text("Testing uses each provider's account/models endpoint and does not send a generation prompt. A green result confirms authentication now, but it cannot guarantee future quota or model availability. Keys are stored in iOS Keychain.")
                           }
 
                           Section("Current free-tier reality") {
-                              Text("Best stack: Gemini for multimodal/long documents, Groq for speed, OpenRouter for rotating free models, SiliconFlow for selected $0 open models, and Pollinations for images. Cerebras currently offers a time-limited credit trial rather than a renewing always-free API tier, so it is not a default provider here.")
+                              Text("Best stack: Gemini for multimodal documents, Groq for speed, OpenRouter for rotating free models, SiliconFlow for selected $0 open models, and Pollinations for images. The limits above belong to this app and can be changed independently; provider-side limits still win.")
                                   .font(.footnote)
                           }
                       }
+                      .scrollDismissesKeyboard(.interactively)
                       .navigationTitle("Settings / الإعدادات")
+                      .toolbar {
+                          ToolbarItem(placement: .navigationBarLeading) { TopTabMenu() }
+                          ToolbarItemGroup(placement: .keyboard) {
+                              Spacer()
+                              Button("Done") { settingsInputFocused = false }
+                                  .fontWeight(.semibold)
+                          }
+                      }
                   }
                   .onAppear(perform: loadKeys)
+                  .onChange(of: geminiKey) { _ in checks[.gemini] = .unknown }
+                  .onChange(of: groqKey) { _ in checks[.groq] = .unknown }
+                  .onChange(of: openRouterKey) { _ in checks[.openRouter] = .unknown }
+                  .onChange(of: siliconKey) { _ in checks[.siliconFlow] = .unknown }
+                  .onChange(of: customKey) { _ in checks[.custom] = .unknown }
+                  .onChange(of: pollinationsKey) { _ in pollinationsCheck = .unknown }
               }
 
               @ViewBuilder
-              private func providerSection(title: String, key: Binding<String>, model: Binding<String>, note: String) -> some View {
+              private func providerSection(
+                  provider: ProviderID,
+                  title: String,
+                  key: Binding<String>,
+                  model: Binding<String>,
+                  limit: Binding<Int>,
+                  note: String
+              ) -> some View {
                   Section {
                       SecureField("API key", text: key)
                           .textInputAutocapitalization(.never).autocorrectionDisabled()
+                          .focused($settingsInputFocused)
                       TextField("Model ID", text: model)
                           .textInputAutocapitalization(.never).autocorrectionDisabled()
+                          .focused($settingsInputFocused)
+                      Stepper(value: limit, in: 1...20000, step: 25) {
+                          Text("Local daily limit: \(limit.wrappedValue)")
+                      }
+                      LabeledContent("Used today", value: "\(usage.byProvider[provider.rawValue] ?? 0)")
+                      HStack {
+                          KeyStatusBadge(state: state(for: provider))
+                          Spacer()
+                          Button("Test key") { test(provider: provider, key: key.wrappedValue) }
+                              .disabled(state(for: provider) == .checking)
+                      }
                       Text(note).font(.caption).foregroundStyle(.secondary)
                   } header: {
                       Text(title)
                   }
+              }
+
+              private func state(for provider: ProviderID) -> KeyCheckState {
+                  checks[provider] ?? .unknown
               }
 
               private func loadKeys() {
@@ -1600,8 +2071,66 @@ jobs:
                   settings.setKey(siliconKey, for: .siliconFlow)
                   settings.setKey(customKey, for: .custom)
                   settings.setPollinationsKey(pollinationsKey)
-                  saved = true
-                  DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { saved = false }
+              }
+
+              private func test(provider: ProviderID, key: String) {
+                  settings.setKey(key, for: provider)
+                  checks[provider] = .checking
+                  Task {
+                      checks[provider] = await KeyValidationService.shared.validate(provider: provider, key: key, settings: settings)
+                  }
+              }
+
+              private func testPollinations() {
+                  settings.setPollinationsKey(pollinationsKey)
+                  pollinationsCheck = .checking
+                  Task {
+                      pollinationsCheck = await KeyValidationService.shared.validatePollinations(key: pollinationsKey)
+                  }
+              }
+
+              private func saveAndTestAll() {
+                  settingsInputFocused = false
+                  saveKeys()
+                  isTestingAll = true
+                  saved = false
+                  for provider in [ProviderID.gemini, .groq, .openRouter, .siliconFlow, .custom] {
+                      checks[provider] = .checking
+                  }
+                  pollinationsCheck = .checking
+
+                  Task {
+                      async let geminiResult = KeyValidationService.shared.validate(provider: .gemini, key: geminiKey, settings: settings)
+                      async let groqResult = KeyValidationService.shared.validate(provider: .groq, key: groqKey, settings: settings)
+                      async let openRouterResult = KeyValidationService.shared.validate(provider: .openRouter, key: openRouterKey, settings: settings)
+                      async let siliconResult = KeyValidationService.shared.validate(provider: .siliconFlow, key: siliconKey, settings: settings)
+                      async let customResult = KeyValidationService.shared.validate(provider: .custom, key: customKey, settings: settings)
+                      async let pollinationsResult = KeyValidationService.shared.validatePollinations(key: pollinationsKey)
+                      let results = await (geminiResult, groqResult, openRouterResult, siliconResult, customResult, pollinationsResult)
+                      checks[.gemini] = results.0
+                      checks[.groq] = results.1
+                      checks[.openRouter] = results.2
+                      checks[.siliconFlow] = results.3
+                      checks[.custom] = results.4
+                      pollinationsCheck = results.5
+                      isTestingAll = false
+                      saved = true
+                      DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saved = false }
+                  }
+              }
+          }
+
+          struct KeyStatusBadge: View {
+              let state: KeyCheckState
+
+              var body: some View {
+                  Label(state.title, systemImage: state.icon)
+                      .font(.caption)
+                      .foregroundStyle(state.color)
+                      .lineLimit(2)
+                  if state == .checking {
+                      ProgressView().controlSize(.small)
+                  }
               }
           }
           SWIFT_SOURCE
