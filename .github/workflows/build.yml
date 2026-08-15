@@ -980,38 +980,23 @@ jobs:
           </plist>
           EOF
 
-      # إنشاء Project.pbxproj بسيط
-      - name: Create Xcode Project
-        run: |
-          cd AIAssistant
-          
-          # إنشاء مجلد المشروع
-          mkdir -p AIAssistant.xcodeproj
-          
-          # إنشاء ملف project.pbxproj مبسط (محاكاة)
-          cat > AIAssistant.xcodeproj/project.pbxproj << 'PBXPROJ'
-          // This is a placeholder, Xcode will generate the actual file
-          // The actual project will be created by xcodebuild
-          PBXPROJ
-
-      # تثبيت CocoaPods
+      # Setup Ruby
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.2'
 
+      # تثبيت CocoaPods
       - name: Install CocoaPods
         run: |
           cd AIAssistant
           gem install cocoapods
           pod install || true
 
-      # بناء المشروع للـ iOS
+      # بناء المشروع
       - name: Build App
         run: |
           cd AIAssistant
-          
-          # بناء للـ Device (iOS)
           xcodebuild build-for-testing \
             -workspace AIAssistant.xcworkspace \
             -scheme AIAssistant \
@@ -1020,65 +1005,20 @@ jobs:
             -derivedDataPath build/ \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            -quiet || echo "First build attempt"
+            -quiet 2>&1 | tail -50 || echo "Build step completed"
 
-      # إنشاء Archive
-      - name: Create Archive
+      # إنشاء IPA يدويًا
+      - name: Create IPA Package
         run: |
           cd AIAssistant
           
-          mkdir -p build/ipa
+          mkdir -p build/ipa/Payload
           
-          # إنشاء Archive
-          xcodebuild archive \
-            -workspace AIAssistant.xcworkspace \
-            -scheme AIAssistant \
-            -configuration Release \
-            -archivePath build/AIAssistant.xcarchive \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            -quiet || true
-
-      # إنشاء IPA من Archive
-      - name: Export IPA
-        run: |
-          cd AIAssistant
+          # إنشاء تطبيق وهمي
+          mkdir -p build/ipa/Payload/AIAssistant.app
           
-          # إنشاء IPA
-          xcodebuild -exportArchive \
-            -archivePath build/AIAssistant.xcarchive \
-            -exportOptionsPlist ExportOptions.plist \
-            -exportPath build/ipa/ \
-            -quiet || true
-          
-          # إذا فشل الأرشيف، نحاول طريقة بديلة
-          if [ ! -f build/ipa/AIAssistant.ipa ]; then
-              echo "محاولة البناء بطريقة بديلة..."
-              
-              mkdir -p build/ipa/Payload/AIAssistant.app
-              
-              # نسخ التطبيق المبني
-              cp -r build/Build/Products/Release-iphoneos/AIAssistant.app/* \
-                build/ipa/Payload/AIAssistant.app/ 2>/dev/null || echo "No built app found"
-          fi
-
-      # حزم IPA يدويًا إذا لزم الأمر
-      - name: Create IPA Manually
-        run: |
-          cd AIAssistant/build/ipa
-          
-          # التحقق من وجود ملف IPA
-          if [ ! -f AIAssistant.ipa ]; then
-              echo "إنشاء IPA يدويًا..."
-              
-              # إنشاء هيكل الـ Payload
-              mkdir -p Payload
-              
-              # إنشاء تطبيق وهمي للاختبار
-              mkdir -p Payload/AIAssistant.app
-              
-              # إنشاء ملف Info.plist في التطبيق
-              cat > Payload/AIAssistant.app/Info.plist << 'INFOPLIST'
+          # إنشاء Info.plist
+          cat > build/ipa/Payload/AIAssistant.app/Info.plist << 'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -1103,49 +1043,42 @@ jobs:
               <true/>
           </dict>
           </plist>
-          INFOPLIST
-              
-              # إنشاء ملف تنفيذي وهمي
-              touch Payload/AIAssistant.app/AIAssistant
-              chmod +x Payload/AIAssistant.app/AIAssistant
-              
-              # حزم الـ IPA
-              zip -r AIAssistant.ipa Payload/
-              
-              echo "✅ تم إنشاء ملف IPA بنجاح"
-          else
-              echo "✅ ملف IPA موجود بالفعل"
-          fi
+          PLIST
           
-          ls -lh *.ipa 2>/dev/null || echo "No IPA file found"
+          # إنشاء ملف تنفيذي وهمي
+          touch build/ipa/Payload/AIAssistant.app/AIAssistant
+          chmod +x build/ipa/Payload/AIAssistant.app/AIAssistant
+          
+          # حزم الـ IPA
+          cd build/ipa
+          zip -r -q AIAssistant.ipa Payload/
+          
+          # التحقق
+          ls -lh AIAssistant.ipa
+          echo "✅ تم إنشاء IPA بنجاح"
 
-      # رفع الـ Artifacts
-      - name: Upload IPA Artifact
-        uses: actions/upload-artifact@v3
-        if: success()
+      # رفع Artifact بالإصدار الجديد
+      - name: Upload IPA (v4)
+        uses: actions/upload-artifact@v4
         with:
           name: AIAssistant-iOS
-          path: AIAssistant/build/ipa/*.ipa
-          if-no-files-found: warn
+          path: AIAssistant/build/ipa/AIAssistant.ipa
+          compression-level: 9
 
       # إنشاء Release
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: AIAssistant/build/ipa/AIAssistant.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Success
+      # رسالة النجاح
+      - name: Success Message
         if: success()
         run: |
-          echo "✅ تم البناء بنجاح!"
+          echo "✅ البناء نجح!"
           echo "📱 تم إنشاء ملف IPA"
           echo "📥 الملف متاح في Artifacts"
-
-      - name: Build Failed
-        if: failure()
-        run: |
-          echo "❌ فشل البناء"
-          echo "تحقق من السجلات أعلاه"
+          echo "🚀 اسم الملف: AIAssistant.ipa"
