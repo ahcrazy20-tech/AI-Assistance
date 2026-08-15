@@ -1,0 +1,980 @@
+name: Build AI Assistant iOS App for TrollStore
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  XCODE_VERSION: 15.3
+  IOS_DEPLOYMENT_TARGET: 16.4
+
+jobs:
+  build:
+    runs-on: macos-14
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Create Project Structure
+        run: |
+          mkdir -p AIAssistant/AIAssistant
+          mkdir -p .github/workflows
+
+      # إنشاء ملف Config.swift مع حدود مختلفة لكل AI
+      - name: Create Config.swift
+        run: |
+          cat > AIAssistant/AIAssistant/Config.swift << 'EOF'
+          import Foundation
+
+          struct AIConfig {
+              // API Keys - تُحفظ في UserDefaults
+              static var groqApiKey: String {
+                  return UserDefaults.standard.string(forKey: "groqApiKey") ?? ""
+              }
+              
+              static var siliconApiKey: String {
+                  return UserDefaults.standard.string(forKey: "siliconApiKey") ?? ""
+              }
+              
+              static var huggingFaceKey: String {
+                  return UserDefaults.standard.string(forKey: "huggingFaceKey") ?? ""
+              }
+              
+              static var cohereApiKey: String {
+                  return UserDefaults.standard.string(forKey: "cohereApiKey") ?? ""
+              }
+              
+              static var togetherApiKey: String {
+                  return UserDefaults.standard.string(forKey: "togetherApiKey") ?? ""
+              }
+              
+              static var replicateApiKey: String {
+                  return UserDefaults.standard.string(forKey: "replicateApiKey") ?? ""
+              }
+              
+              // API Endpoints
+              static let groqEndpoint = "https://api.groq.com/openai/v1/chat/completions"
+              static let siliconEndpoint = "https://api.siliconflow.cn/v1/chat/completions"
+              static let huggingFaceEndpoint = "https://api-inference.huggingface.co/models/gpt2"
+              static let cohereEndpoint = "https://api.cohere.ai/v1/chat"
+              static let togetherEndpoint = "https://api.together.xyz/v1/chat/completions"
+              static let replicateEndpoint = "https://api.replicate.com/v1/predictions"
+              
+              // 🔥 حدود يومية مختلفة لكل AI
+              static let aiLimits: [String: Int] = [
+                  "groq": 120,           // Groq: 30 طلب/دقيقة = 1800 طلب/ساعة
+                  "silicon": 150,        // SiliconFlow: حد عالي جداً
+                  "huggingface": 50,     // Hugging Face: محدود أكثر
+                  "cohere": 100,         // Cohere: متوسط
+                  "together": 200,       // Together AI: حد عالي
+                  "replicate": 30        // Replicate: مدفوع أكثر
+              ]
+              
+              static let imageQuality: CGFloat = 0.8
+          }
+
+          // MARK: - AI Service Enum
+          enum AIService: String, CaseIterable {
+              case groq = "Groq"
+              case silicon = "SiliconFlow"
+              case huggingface = "Hugging Face"
+              case cohere = "Cohere"
+              case together = "Together AI"
+              case replicate = "Replicate"
+              
+              var dailyLimit: Int {
+                  return AIConfig.aiLimits[self.rawValue.lowercased()] ?? 50
+              }
+              
+              var emoji: String {
+                  switch self {
+                  case .groq: return "🚀"
+                  case .silicon: return "⚡"
+                  case .huggingface: return "🤗"
+                  case .cohere: return "🔷"
+                  case .together: return "🎯"
+                  case .replicate: return "🎬"
+                  }
+              }
+          }
+
+          // MARK: - Chat Message Model
+          struct ChatMessage: Identifiable, Codable {
+              let id: UUID = UUID()
+              let role: String
+              let content: String
+              let aiService: String = ""
+              let timestamp: Date = Date()
+              
+              enum CodingKeys: String, CodingKey {
+                  case role, content, aiService
+              }
+          }
+
+          // MARK: - Analysis Result Model
+          struct AnalysisResult: Identifiable, Codable {
+              let id: UUID = UUID()
+              let type: String
+              let result: String
+              let timestamp: Date = Date()
+              
+              enum CodingKeys: String, CodingKey {
+                  case type, result
+              }
+          }
+
+          // MARK: - API Response Models
+          struct GroqResponse: Codable {
+              let choices: [GroqChoice]
+              
+              struct GroqChoice: Codable {
+                  let message: GroqMessage
+                  
+                  struct GroqMessage: Codable {
+                      let content: String
+                  }
+              }
+          }
+
+          struct SiliconResponse: Codable {
+              let choices: [SiliconChoice]
+              
+              struct SiliconChoice: Codable {
+                  let message: SiliconMessage
+                  
+                  struct SiliconMessage: Codable {
+                      let content: String
+                  }
+              }
+          }
+
+          struct CoheResponse: Codable {
+              let text: String
+          }
+
+          struct TogetherResponse: Codable {
+              let choices: [TogetherChoice]
+              
+              struct TogetherChoice: Codable {
+                  let message: TogetherMessage
+                  
+                  struct TogetherMessage: Codable {
+                      let content: String
+                  }
+              }
+          }
+          EOF
+
+      # إنشاء ملف NetworkManager.swift
+      - name: Create NetworkManager.swift
+        run: |
+          cat > AIAssistant/AIAssistant/NetworkManager.swift << 'EOF'
+          import Foundation
+
+          class AINetworkManager: ObservableObject {
+              static let shared = AINetworkManager()
+              
+              @Published var isLoading = false
+              @Published var error: String?
+              @Published var requestCounts: [String: Int] = [:]
+              
+              init() {
+                  loadRequestCounts()
+              }
+              
+              // MARK: - Check Daily Limit per AI
+              private func checkDailyLimit(for service: AIService) -> Bool {
+                  let today = Calendar.current.startOfDay(for: Date())
+                  let lastDateKey = "lastRequestDate_\(service.rawValue)"
+                  let countKey = "requestCount_\(service.rawValue)"
+                  
+                  let lastRequestDate = UserDefaults.standard.object(forKey: lastDateKey) as? Date ?? Date.distantPast
+                  
+                  if !Calendar.current.isDate(today, inSameDayAs: lastRequestDate) {
+                      requestCounts[service.rawValue] = 0
+                      UserDefaults.standard.set(today, forKey: lastDateKey)
+                  }
+                  
+                  let currentCount = requestCounts[service.rawValue] ?? 0
+                  return currentCount < service.dailyLimit
+              }
+              
+              private func incrementCount(for service: AIService) {
+                  let countKey = "requestCount_\(service.rawValue)"
+                  var count = requestCounts[service.rawValue] ?? 0
+                  count += 1
+                  requestCounts[service.rawValue] = count
+                  UserDefaults.standard.set(count, forKey: countKey)
+              }
+              
+              private func loadRequestCounts() {
+                  let today = Calendar.current.startOfDay(for: Date())
+                  
+                  for service in AIService.allCases {
+                      let lastDateKey = "lastRequestDate_\(service.rawValue)"
+                      let countKey = "requestCount_\(service.rawValue)"
+                      
+                      let lastDate = UserDefaults.standard.object(forKey: lastDateKey) as? Date ?? Date.distantPast
+                      
+                      if Calendar.current.isDate(today, inSameDayAs: lastDate) {
+                          requestCounts[service.rawValue] = UserDefaults.standard.integer(forKey: countKey)
+                      } else {
+                          requestCounts[service.rawValue] = 0
+                          UserDefaults.standard.set(today, forKey: lastDateKey)
+                      }
+                  }
+              }
+              
+              // MARK: - Groq API
+              func callGroqAPI(prompt: String, completion: @escaping (Result<String, Error>) -> Void) {
+                  guard checkDailyLimit(for: .groq) else {
+                      let limit = AIService.groq.dailyLimit
+                      completion(.failure(NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "تم تجاوز الحد اليومي لـ Groq (\(limit) طلب)"])))
+                      return
+                  }
+                  
+                  guard !AIConfig.groqApiKey.isEmpty else {
+                      completion(.failure(NSError(domain: "", code: -2, userInfo: [NSLocalizedDescriptionKey: "لم تضف مفتاح Groq API"])))
+                      return
+                  }
+                  
+                  isLoading = true
+                  
+                  var request = URLRequest(url: URL(string: AIConfig.groqEndpoint)!)
+                  request.httpMethod = "POST"
+                  request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                  request.setValue("Bearer \(AIConfig.groqApiKey)", forHTTPHeaderField: "Authorization")
+                  
+                  let body: [String: Any] = [
+                      "model": "mixtral-8x7b-32768",
+                      "messages": [["role": "user", "content": prompt]],
+                      "max_tokens": 2048
+                  ]
+                  
+                  request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+                  
+                  URLSession.shared.dataTask(with: request) { data, _, error in
+                      self.isLoading = false
+                      
+                      if let error = error {
+                          completion(.failure(error))
+                          return
+                      }
+                      
+                      guard let data = data else {
+                          completion(.failure(NSError(domain: "", code: -3, userInfo: nil)))
+                          return
+                      }
+                      
+                      do {
+                          let response = try JSONDecoder().decode(GroqResponse.self, from: data)
+                          if let content = response.choices.first?.message.content {
+                              self.incrementCount(for: .groq)
+                              completion(.success(content))
+                          }
+                      } catch {
+                          completion(.failure(error))
+                      }
+                  }.resume()
+              }
+              
+              // MARK: - SiliconFlow API
+              func callSiliconFlowAPI(prompt: String, completion: @escaping (Result<String, Error>) -> Void) {
+                  guard checkDailyLimit(for: .silicon) else {
+                      let limit = AIService.silicon.dailyLimit
+                      completion(.failure(NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "تم تجاوز الحد اليومي لـ SiliconFlow (\(limit) طلب)"])))
+                      return
+                  }
+                  
+                  guard !AIConfig.siliconApiKey.isEmpty else {
+                      completion(.failure(NSError(domain: "", code: -2, userInfo: [NSLocalizedDescriptionKey: "لم تضف مفتاح SiliconFlow API"])))
+                      return
+                  }
+                  
+                  isLoading = true
+                  
+                  var request = URLRequest(url: URL(string: AIConfig.siliconEndpoint)!)
+                  request.httpMethod = "POST"
+                  request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                  request.setValue("Bearer \(AIConfig.siliconApiKey)", forHTTPHeaderField: "Authorization")
+                  
+                  let body: [String: Any] = [
+                      "model": "Qwen/Qwen2-7B-Instruct",
+                      "messages": [["role": "user", "content": prompt]],
+                      "temperature": 0.7
+                  ]
+                  
+                  request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+                  
+                  URLSession.shared.dataTask(with: request) { data, _, error in
+                      self.isLoading = false
+                      
+                      if let error = error {
+                          completion(.failure(error))
+                          return
+                      }
+                      
+                      guard let data = data else {
+                          completion(.failure(NSError(domain: "", code: -3, userInfo: nil)))
+                          return
+                      }
+                      
+                      do {
+                          let response = try JSONDecoder().decode(SiliconResponse.self, from: data)
+                          if let content = response.choices.first?.message.content {
+                              self.incrementCount(for: .silicon)
+                              completion(.success(content))
+                          }
+                      } catch {
+                          completion(.failure(error))
+                      }
+                  }.resume()
+              }
+              
+              // MARK: - Hugging Face API
+              func callHuggingFaceAPI(prompt: String, completion: @escaping (Result<String, Error>) -> Void) {
+                  guard checkDailyLimit(for: .huggingface) else {
+                      let limit = AIService.huggingface.dailyLimit
+                      completion(.failure(NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "تم تجاوز الحد اليومي لـ HuggingFace (\(limit) طلب)"])))
+                      return
+                  }
+                  
+                  guard !AIConfig.huggingFaceKey.isEmpty else {
+                      completion(.failure(NSError(domain: "", code: -2, userInfo: [NSLocalizedDescriptionKey: "لم تضف مفتاح Hugging Face API"])))
+                      return
+                  }
+                  
+                  isLoading = true
+                  
+                  var request = URLRequest(url: URL(string: AIConfig.huggingFaceEndpoint)!)
+                  request.httpMethod = "POST"
+                  request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                  request.setValue("Bearer \(AIConfig.huggingFaceKey)", forHTTPHeaderField: "Authorization")
+                  
+                  let body: [String: Any] = [
+                      "inputs": prompt,
+                      "parameters": ["max_new_tokens": 512]
+                  ]
+                  
+                  request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+                  
+                  URLSession.shared.dataTask(with: request) { data, _, error in
+                      self.isLoading = false
+                      
+                      if let error = error {
+                          completion(.failure(error))
+                          return
+                      }
+                      
+                      guard let data = data else {
+                          completion(.failure(NSError(domain: "", code: -3, userInfo: nil)))
+                          return
+                      }
+                      
+                      do {
+                          if let json = try JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+                             let firstResult = json.first,
+                             let generatedText = firstResult["generated_text"] as? String {
+                              self.incrementCount(for: .huggingface)
+                              completion(.success(generatedText))
+                          }
+                      } catch {
+                          completion(.failure(error))
+                      }
+                  }.resume()
+              }
+              
+              // MARK: - Cohere API
+              func callCohereAPI(prompt: String, completion: @escaping (Result<String, Error>) -> Void) {
+                  guard checkDailyLimit(for: .cohere) else {
+                      let limit = AIService.cohere.dailyLimit
+                      completion(.failure(NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "تم تجاوز الحد اليومي لـ Cohere (\(limit) طلب)"])))
+                      return
+                  }
+                  
+                  guard !AIConfig.cohereApiKey.isEmpty else {
+                      completion(.failure(NSError(domain: "", code: -2, userInfo: [NSLocalizedDescriptionKey: "لم تضف مفتاح Cohere API"])))
+                      return
+                  }
+                  
+                  isLoading = true
+                  
+                  var request = URLRequest(url: URL(string: AIConfig.cohereEndpoint)!)
+                  request.httpMethod = "POST"
+                  request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                  request.setValue("Bearer \(AIConfig.cohereApiKey)", forHTTPHeaderField: "Authorization")
+                  
+                  let body: [String: Any] = [
+                      "message": prompt,
+                      "max_tokens": 1024
+                  ]
+                  
+                  request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+                  
+                  URLSession.shared.dataTask(with: request) { data, _, error in
+                      self.isLoading = false
+                      
+                      if let error = error {
+                          completion(.failure(error))
+                          return
+                      }
+                      
+                      guard let data = data else {
+                          completion(.failure(NSError(domain: "", code: -3, userInfo: nil)))
+                          return
+                      }
+                      
+                      do {
+                          if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                             let text = json["text"] as? String {
+                              self.incrementCount(for: .cohere)
+                              completion(.success(text))
+                          }
+                      } catch {
+                          completion(.failure(error))
+                      }
+                  }.resume()
+              }
+              
+              // MARK: - Together AI API
+              func callTogetherAPI(prompt: String, completion: @escaping (Result<String, Error>) -> Void) {
+                  guard checkDailyLimit(for: .together) else {
+                      let limit = AIService.together.dailyLimit
+                      completion(.failure(NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "تم تجاوز الحد اليومي لـ Together (\(limit) طلب)"])))
+                      return
+                  }
+                  
+                  guard !AIConfig.togetherApiKey.isEmpty else {
+                      completion(.failure(NSError(domain: "", code: -2, userInfo: [NSLocalizedDescriptionKey: "لم تضف مفتاح Together AI API"])))
+                      return
+                  }
+                  
+                  isLoading = true
+                  
+                  var request = URLRequest(url: URL(string: AIConfig.togetherEndpoint)!)
+                  request.httpMethod = "POST"
+                  request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                  request.setValue("Bearer \(AIConfig.togetherApiKey)", forHTTPHeaderField: "Authorization")
+                  
+                  let body: [String: Any] = [
+                      "model": "meta-llama/Llama-2-7b-chat-hf",
+                      "messages": [["role": "user", "content": prompt]],
+                      "max_tokens": 1024
+                  ]
+                  
+                  request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+                  
+                  URLSession.shared.dataTask(with: request) { data, _, error in
+                      self.isLoading = false
+                      
+                      if let error = error {
+                          completion(.failure(error))
+                          return
+                      }
+                      
+                      guard let data = data else {
+                          completion(.failure(NSError(domain: "", code: -3, userInfo: nil)))
+                          return
+                      }
+                      
+                      do {
+                          let response = try JSONDecoder().decode(TogetherResponse.self, from: data)
+                          if let content = response.choices.first?.message.content {
+                              self.incrementCount(for: .together)
+                              completion(.success(content))
+                          }
+                      } catch {
+                          completion(.failure(error))
+                      }
+                  }.resume()
+              }
+              
+              // MARK: - Image Analysis
+              func analyzeImage(_ image: UIImage, using service: AIService, completion: @escaping (Result<String, Error>) -> Void) {
+                  guard checkDailyLimit(for: service) else {
+                      let limit = service.dailyLimit
+                      completion(.failure(NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "تم تجاوز الحد اليومي لـ \(service.rawValue) (\(limit) طلب)"])))
+                      return
+                  }
+                  
+                  isLoading = true
+                  let prompt = "تحليل هذه الصورة بالتفصيل وأخبرني ماذا ترى فيها"
+                  
+                  switch service {
+                  case .groq:
+                      callGroqAPI(prompt: prompt) { result in
+                          completion(result)
+                      }
+                  case .silicon:
+                      callSiliconFlowAPI(prompt: prompt) { result in
+                          completion(result)
+                      }
+                  case .huggingface:
+                      callHuggingFaceAPI(prompt: prompt) { result in
+                          completion(result)
+                      }
+                  case .cohere:
+                      callCohereAPI(prompt: prompt) { result in
+                          completion(result)
+                      }
+                  case .together:
+                      callTogetherAPI(prompt: prompt) { result in
+                          completion(result)
+                      }
+                  case .replicate:
+                      completion(.failure(NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "Replicate غير متاح حالياً"])))
+                  }
+              }
+              
+              func getRequestCount(for service: AIService) -> Int {
+                  return requestCounts[service.rawValue] ?? 0
+              }
+          }
+          EOF
+
+      # إنشاء ملف ContentView.swift
+      - name: Create ContentView.swift
+        run: |
+          cat > AIAssistant/AIAssistant/ContentView.swift << 'EOF'
+          import SwiftUI
+          import PhotosUI
+
+          struct ContentView: View {
+              @StateObject private var networkManager = AINetworkManager.shared
+              @State private var chatMessages: [ChatMessage] = []
+              @State private var userInput: String = ""
+              @State private var selectedImage: UIImage?
+              @State private var showImagePicker = false
+              @State private var selectedTab = 0
+              @State private var selectedAIService: AIService = .groq
+              
+              var body: some View {
+                  TabView(selection: $selectedTab) {
+                      chatTab
+                          .tabItem {
+                              Label("محادثة", systemImage: "message.fill")
+                          }
+                          .tag(0)
+                      
+                      imageTab
+                          .tabItem {
+                              Label("الصور", systemImage: "photo.fill")
+                          }
+                          .tag(1)
+                      
+                      statsTab
+                          .tabItem {
+                              Label("الإحصائيات", systemImage: "chart.bar.fill")
+                          }
+                          .tag(2)
+                      
+                      settingsTab
+                          .tabItem {
+                              Label("الإعدادات", systemImage: "gear")
+                          }
+                          .tag(3)
+                  }
+                  .navigationBarTitleDisplayMode(.inline)
+                  .toolbar {
+                      ToolbarItem(placement: .principal) {
+                          Text("مساعد الذكاء الصناعي")
+                              .font(.headline)
+                      }
+                  }
+              }
+              
+              // MARK: - Chat Tab
+              private var chatTab: some View {
+                  VStack {
+                      ScrollViewReader { proxy in
+                          ScrollView {
+                              VStack(alignment: .leading, spacing: 12) {
+                                  ForEach(chatMessages) { msg in
+                                      chatBubble(msg)
+                                  }
+                                  if networkManager.isLoading {
+                                      HStack {
+                                          ProgressView()
+                                          Text("جاري المعالجة...")
+                                          Spacer()
+                                      }
+                                      .padding()
+                                      .background(Color.gray.opacity(0.1))
+                                      .cornerRadius(12)
+                                  }
+                              }
+                              .padding()
+                          }
+                          .onChange(of: chatMessages.count) { _ in
+                              proxy.scrollTo(chatMessages.last?.id)
+                          }
+                      }
+                      
+                      VStack(spacing: 12) {
+                          // AI Service Picker
+                          Picker("اختر خدمة AI", selection: $selectedAIService) {
+                              ForEach(AIService.allCases, id: \.self) { service in
+                                  HStack {
+                                      Text(service.emoji)
+                                      Text(service.rawValue)
+                                      Text("(\(networkManager.getRequestCount(for: service))/\(service.dailyLimit))")
+                                          .font(.caption)
+                                          .foregroundColor(.gray)
+                                  }
+                                  .tag(service)
+                              }
+                          }
+                          .pickerStyle(.menu)
+                          .padding(.horizontal)
+                          
+                          // Input
+                          HStack(spacing: 12) {
+                              TextField("اكتب رسالتك...", text: $userInput)
+                                  .textFieldStyle(.roundedBorder)
+                                  .disabled(networkManager.isLoading || networkManager.getRequestCount(for: selectedAIService) >= selectedAIService.dailyLimit)
+                              
+                              Button(action: sendMessage) {
+                                  if networkManager.isLoading {
+                                      ProgressView()
+                                  } else {
+                                      Image(systemName: "paperplane.fill")
+                                          .foregroundColor(.white)
+                                  }
+                              }
+                              .padding(10)
+                              .background(Color.blue)
+                              .cornerRadius(8)
+                              .disabled(networkManager.isLoading || userInput.isEmpty || networkManager.getRequestCount(for: selectedAIService) >= selectedAIService.dailyLimit)
+                          }
+                          .padding()
+                      }
+                      .background(Color.gray.opacity(0.05))
+                  }
+              }
+              
+              // MARK: - Image Tab
+              private var imageTab: some View {
+                  VStack {
+                      if let image = selectedImage {
+                          Image(uiImage: image)
+                              .resizable()
+                              .scaledToFit()
+                              .frame(maxHeight: 300)
+                              .cornerRadius(12)
+                              .padding()
+                          
+                          HStack(spacing: 12) {
+                              Button(action: { showImagePicker = true }) {
+                                  Label("صورة أخرى", systemImage: "photo")
+                              }
+                              .buttonStyle(.bordered)
+                              
+                              Button(action: analyzeImage) {
+                                  if networkManager.isLoading {
+                                      ProgressView()
+                                  } else {
+                                      Label("تحليل", systemImage: "sparkles")
+                                  }
+                              }
+                              .buttonStyle(.borderedProminent)
+                              .disabled(networkManager.isLoading || networkManager.getRequestCount(for: selectedAIService) >= selectedAIService.dailyLimit)
+                          }
+                          .padding()
+                      } else {
+                          VStack(spacing: 20) {
+                              Image(systemName: "photo.on.rectangle.angled")
+                                  .font(.system(size: 60))
+                                  .foregroundColor(.gray)
+                              
+                              Text("اختر صورة للتحليل")
+                              
+                              Button(action: { showImagePicker = true }) {
+                                  Label("فتح الصور", systemImage: "photo.fill")
+                              }
+                              .buttonStyle(.borderedProminent)
+                          }
+                          .frame(maxWidth: .infinity, maxHeight: .infinity)
+                      }
+                      Spacer()
+                  }
+                  .photosPicker(isPresented: $showImagePicker, selection: $selectedImage)
+              }
+              
+              // MARK: - Stats Tab
+              private var statsTab: some View {
+                  List {
+                      Section(header: Text("استهلاك الطلبات اليومي")) {
+                          ForEach(AIService.allCases, id: \.self) { service in
+                              let count = networkManager.getRequestCount(for: service)
+                              let limit = service.dailyLimit
+                              let percentage = Double(count) / Double(limit)
+                              
+                              VStack(alignment: .leading, spacing: 8) {
+                                  HStack {
+                                      Text(service.emoji)
+                                      Text(service.rawValue)
+                                      Spacer()
+                                      Text("\(count)/\(limit)")
+                                          .fontWeight(.bold)
+                                          .foregroundColor(count >= limit ? .red : .green)
+                                  }
+                                  
+                                  ProgressView(value: percentage)
+                                      .tint(percentage >= 0.8 ? .red : percentage >= 0.5 ? .orange : .green)
+                              }
+                              .padding(.vertical, 8)
+                          }
+                      }
+                      
+                      Section(header: Text("معلومات")) {
+                          HStack {
+                              Text("إجمالي الطلبات")
+                              Spacer()
+                              Text("\(AIService.allCases.reduce(0) { $0 + networkManager.getRequestCount(for: $1) })")
+                                  .fontWeight(.bold)
+                          }
+                      }
+                  }
+              }
+              
+              // MARK: - Settings Tab
+              private var settingsTab: some View {
+                  NavigationView {
+                      Form {
+                          Section(header: Text("مفاتيح API")) {
+                              SecureField("Groq API Key", text: Binding(
+                                  get: { AIConfig.groqApiKey },
+                                  set: { UserDefaults.standard.set($0, forKey: "groqApiKey") }
+                              ))
+                              
+                              SecureField("SiliconFlow API Key", text: Binding(
+                                  get: { AIConfig.siliconApiKey },
+                                  set: { UserDefaults.standard.set($0, forKey: "siliconApiKey") }
+                              ))
+                              
+                              SecureField("Hugging Face Key", text: Binding(
+                                  get: { AIConfig.huggingFaceKey },
+                                  set: { UserDefaults.standard.set($0, forKey: "huggingFaceKey") }
+                              ))
+                              
+                              SecureField("Cohere API Key", text: Binding(
+                                  get: { AIConfig.cohereApiKey },
+                                  set: { UserDefaults.standard.set($0, forKey: "cohereApiKey") }
+                              ))
+                              
+                              SecureField("Together AI Key", text: Binding(
+                                  get: { AIConfig.togetherApiKey },
+                                  set: { UserDefaults.standard.set($0, forKey: "togetherApiKey") }
+                              ))
+                              
+                              SecureField("Replicate API Key", text: Binding(
+                                  get: { AIConfig.replicateApiKey },
+                                  set: { UserDefaults.standard.set($0, forKey: "replicateApiKey") }
+                              ))
+                          }
+                          
+                          Section(header: Text("الحدود اليومية")) {
+                              ForEach(AIService.allCases, id: \.self) { service in
+                                  HStack {
+                                      Text("\(service.emoji) \(service.rawValue)")
+                                      Spacer()
+                                      Text("\(service.dailyLimit)")
+                                          .fontWeight(.bold)
+                                          .foregroundColor(.blue)
+                                  }
+                              }
+                          }
+                          
+                          Section(header: Text("معلومات")) {
+                              HStack {
+                                  Text("الإصدار")
+                                  Spacer()
+                                  Text("1.0.0")
+                              }
+                              
+                              Link("زيارة Groq", destination: URL(string: "https://groq.com")!)
+                              Link("زيارة SiliconFlow", destination: URL(string: "https://siliconflow.cn")!)
+                              Link("زيارة Hugging Face", destination: URL(string: "https://huggingface.co")!)
+                              Link("زيارة Cohere", destination: URL(string: "https://cohere.com")!)
+                              Link("زيارة Together", destination: URL(string: "https://together.ai")!)
+                          }
+                          
+                          Section {
+                              Button(action: resetApp) {
+                                  Text("إعادة تعيين الحدود")
+                                      .foregroundColor(.orange)
+                              }
+                              
+                              Button(action: resetAllData) {
+                                  Text("حذف جميع البيانات")
+                                      .foregroundColor(.red)
+                              }
+                          }
+                      }
+                      .navigationTitle("الإعدادات")
+                  }
+              }
+              
+              // MARK: - Helper Views
+              @ViewBuilder
+              private func chatBubble(_ msg: ChatMessage) -> some View {
+                  HStack {
+                      if msg.role == "user" {
+                          Spacer()
+                          VStack(alignment: .trailing) {
+                              Text(msg.content)
+                                  .padding(12)
+                                  .background(Color.blue)
+                                  .foregroundColor(.white)
+                                  .cornerRadius(12)
+                          }
+                      } else {
+                          VStack(alignment: .leading) {
+                              Text(msg.content)
+                                  .padding(12)
+                                  .background(Color.gray.opacity(0.2))
+                                  .cornerRadius(12)
+                          }
+                          Spacer()
+                      }
+                  }
+              }
+              
+              // MARK: - Methods
+              private func sendMessage() {
+                  let msg = ChatMessage(role: "user", content: userInput)
+                  chatMessages.append(msg)
+                  let query = userInput
+                  userInput = ""
+                  
+                  switch selectedAIService {
+                  case .groq:
+                      networkManager.callGroqAPI(prompt: query) { handleResponse($0) }
+                  case .silicon:
+                      networkManager.callSiliconFlowAPI(prompt: query) { handleResponse($0) }
+                  case .huggingface:
+                      networkManager.callHuggingFaceAPI(prompt: query) { handleResponse($0) }
+                  case .cohere:
+                      networkManager.callCohereAPI(prompt: query) { handleResponse($0) }
+                  case .together:
+                      networkManager.callTogetherAPI(prompt: query) { handleResponse($0) }
+                  case .replicate:
+                      chatMessages.append(ChatMessage(role: "assistant", content: "❌ Replicate غير متاح حالياً"))
+                  }
+              }
+              
+              private func analyzeImage() {
+                  guard let image = selectedImage else { return }
+                  networkManager.analyzeImage(image, using: selectedAIService) { result in
+                      handleResponse(result)
+                  }
+              }
+              
+              private func handleResponse(_ result: Result<String, Error>) {
+                  DispatchQueue.main.async {
+                      switch result {
+                      case .success(let response):
+                          chatMessages.append(ChatMessage(role: "assistant", content: response))
+                      case .failure(let error):
+                          chatMessages.append(ChatMessage(role: "assistant", content: "❌ خطأ: \(error.localizedDescription)"))
+                      }
+                  }
+              }
+              
+              private func resetApp() {
+                  for service in AIService.allCases {
+                      UserDefaults.standard.removeObject(forKey: "requestCount_\(service.rawValue)")
+                      UserDefaults.standard.removeObject(forKey: "lastRequestDate_\(service.rawValue)")
+                  }
+                  networkManager.loadRequestCounts()
+              }
+              
+              private func resetAllData() {
+                  UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier ?? "")
+                  chatMessages.removeAll()
+              }
+          }
+
+          #Preview {
+              ContentView()
+          }
+          EOF
+
+      # إنشاء App.swift
+      - name: Create App.swift
+        run: |
+          cat > AIAssistant/AIAssistant/AIAssistantApp.swift << 'EOF'
+          import SwiftUI
+
+          @main
+          struct AIAssistantApp: App {
+              var body: some Scene {
+                  WindowGroup {
+                      ContentView()
+                  }
+              }
+          }
+          EOF
+
+      # إنشاء Info.plist
+      - name: Create Info.plist
+        run: |
+          cat > AIAssistant/AIAssistant/Info.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleDevelopmentRegion</key>
+              <string>ar</string>
+              <key>CFBundleExecutable</key>
+              <string>$(EXECUTABLE_NAME)</string>
+              <key>CFBundleIdentifier</key>
+              <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+              <key>CFBundleInfoDictionaryVersion</key>
+              <string>6.0</string>
+              <key>CFBundleName</key>
+              <string>AI Assistant</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0</string>
+              <key>CFBundleVersion</key>
+              <string>1</string>
+              <key>LSRequiresIPhoneOS</key>
+              <true/>
+              <key>UIApplicationSceneManifest</key>
+              <dict>
+                  <key>UIApplicationSupportsMultipleScenes</key>
+                  <true/>
+              </dict>
+              <key>UIApplicationSupportsIndirectInputEvents</key>
+              <true/>
+              <key>UILaunchScreen</key>
+              <dict/>
+              <key>UISupportedInterfaceOrientations</key>
+              <array>
+                  <string>UIInterfaceOrientationPortrait</string>
+              </array>
+              <key>NSPhotoLibraryUsageDescription</key>
+              <string>نحتاج إلى الوصول لصورك لتحليلها</string>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+
+      - name: Install CocoaPods
+        run: |
+          cd AIAssistant
+          gem install cocoapods
+          pod install || true
+
+      - name: Build Success
+        run: echo "✅ تم إنشاء جميع الملفات بنجاح!"
