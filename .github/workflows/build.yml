@@ -1,81 +1,1808 @@
-# ============================================================================
-# AIHub — build.yml (GitHub Actions workflow) — النسخة النظيفة (من غير base64)
-# الملفات AIHub.swift + project.yml + exportOptions.plist لازم تكون مرفوعة
-# في الـ repo جنب بعض. ضع هذا الملف في: .github/workflows/build.yml
-# ============================================================================
-name: AIHub Build
+# Save this ONE file as: .github/workflows/build.yml
+# It generates the complete SwiftUI project during GitHub Actions and builds an IPA.
+# No API key is compiled into the app; add provider keys inside the app's Settings tab.
+#
+# Default output: unsigned IPA (sign/sideload it with your own Apple ID using AltStore,
+# Sideloadly, or another legal personal-device signing method).
+#
+# Optional directly signed development IPA:
+#   Repository variable: BUNDLE_ID (must match the provisioning profile)
+#   Repository secrets: BUILD_CERTIFICATE_BASE64, P12_PASSWORD,
+#                       BUILD_PROVISION_PROFILE_BASE64, KEYCHAIN_PASSWORD
+
+name: Build AI Hub iOS
 
 on:
   workflow_dispatch:
   push:
     branches: [main]
-  push:
-    tags: ['v*']
+    paths:
+      - ".github/workflows/build.yml"
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  BUNDLE_ID: ${{ vars.BUNDLE_ID || 'com.personal.aihub' }}
 
 jobs:
-  build:
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
+  build-ios:
+    name: Build iOS 16.4 IPA
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+      BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
 
-      - name: Select Xcode
-        run: sudo xcode-select -switch /Applications/Xcode.app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate the complete app project
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf GeneratedApp
+          mkdir -p GeneratedApp/Sources GeneratedApp/artifacts
+
+          cat > GeneratedApp/project.yml <<'PROJECT_YAML'
+          name: AIHub
+          options:
+            minimumXcodeGenVersion: 2.38.0
+            deploymentTarget:
+              iOS: "16.4"
+          packages:
+            ZIPFoundation:
+              url: https://github.com/weichsel/ZIPFoundation.git
+              from: 0.9.19
+          settings:
+            base:
+              SWIFT_VERSION: 5.0
+              IPHONEOS_DEPLOYMENT_TARGET: 16.4
+              CURRENT_PROJECT_VERSION: 1
+              MARKETING_VERSION: 1.0.0
+              CODE_SIGN_STYLE: Automatic
+          targets:
+            AIHub:
+              type: application
+              platform: iOS
+              deploymentTarget: "16.4"
+              sources:
+                - path: Sources
+              dependencies:
+                - package: ZIPFoundation
+              settings:
+                base:
+                  PRODUCT_NAME: AIHub
+                  PRODUCT_BUNDLE_IDENTIFIER: com.personal.aihub
+                  GENERATE_INFOPLIST_FILE: YES
+                  INFOPLIST_KEY_CFBundleDisplayName: AI Hub
+                  INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+                  INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+                  INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+                  INFOPLIST_KEY_UILaunchScreen_Generation: YES
+                  INFOPLIST_KEY_NSPhotoLibraryUsageDescription: Select images for AI analysis and editing.
+                  INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: Save AI-generated images to your photo library.
+                  TARGETED_DEVICE_FAMILY: 1
+                  SUPPORTS_MACCATALYST: NO
+                  ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+                  ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+              scheme:
+                testTargets: []
+                gatherCoverageData: false
+          PROJECT_YAML
+
+          cat > GeneratedApp/Sources/AIHubApp.swift <<'SWIFT_SOURCE'
+          import Foundation
+          import SwiftUI
+          import UIKit
+          import PhotosUI
+          import Photos
+          import UniformTypeIdentifiers
+          import PDFKit
+          import Vision
+          import Security
+          import ZIPFoundation
+
+          // MARK: - Models
+
+          enum ProviderID: String, CaseIterable, Identifiable, Codable {
+              case auto, gemini, groq, openRouter, siliconFlow, custom
+
+              var id: String { rawValue }
+
+              var title: String {
+                  switch self {
+                  case .auto: return "Auto Fallback"
+                  case .gemini: return "Google Gemini"
+                  case .groq: return "Groq"
+                  case .openRouter: return "OpenRouter Free"
+                  case .siliconFlow: return "SiliconFlow"
+                  case .custom: return "Custom OpenAI API"
+                  }
+              }
+
+              var shortTitle: String {
+                  switch self {
+                  case .auto: return "Auto"
+                  case .gemini: return "Gemini"
+                  case .groq: return "Groq"
+                  case .openRouter: return "OpenRouter"
+                  case .siliconFlow: return "SiliconFlow"
+                  case .custom: return "Custom"
+                  }
+              }
+          }
+
+          enum ChatRole: String, Codable {
+              case user, assistant
+          }
+
+          struct ChatMessage: Identifiable, Codable, Equatable {
+              var id = UUID()
+              let role: ChatRole
+              let text: String
+              var provider: String? = nil
+              var createdAt = Date()
+          }
+
+          struct InputAttachment: Identifiable {
+              let id = UUID()
+              let name: String
+              let mimeType: String
+              let extractedText: String
+              let imageData: Data?
+
+              var isImage: Bool { imageData != nil }
+          }
+
+          struct ExtractionResult {
+              let name: String
+              let mimeType: String
+              let text: String
+              let imageData: Data?
+          }
+
+          struct ChatResult {
+              let text: String
+              let provider: ProviderID
+          }
+
+          struct ServiceError: LocalizedError {
+              let message: String
+              let statusCode: Int?
+
+              init(_ message: String, statusCode: Int? = nil) {
+                  self.message = message
+                  self.statusCode = statusCode
+              }
+
+              var errorDescription: String? {
+                  if let statusCode { return "\(message) (HTTP \(statusCode))" }
+                  return message
+              }
+          }
+
+          // MARK: - Secure key storage
+
+          enum KeychainStore {
+              private static let service = "com.personal.aihub.keys"
+
+              static func read(_ account: String) -> String {
+                  let query: [String: Any] = [
+                      kSecClass as String: kSecClassGenericPassword,
+                      kSecAttrService as String: service,
+                      kSecAttrAccount as String: account,
+                      kSecReturnData as String: true,
+                      kSecMatchLimit as String: kSecMatchLimitOne
+                  ]
+                  var item: CFTypeRef?
+                  guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+                        let data = item as? Data,
+                        let value = String(data: data, encoding: .utf8) else { return "" }
+                  return value
+              }
+
+              static func write(_ value: String, account: String) {
+                  let base: [String: Any] = [
+                      kSecClass as String: kSecClassGenericPassword,
+                      kSecAttrService as String: service,
+                      kSecAttrAccount as String: account
+                  ]
+                  if value.isEmpty {
+                      SecItemDelete(base as CFDictionary)
+                      return
+                  }
+                  let data = Data(value.utf8)
+                  let changes: [String: Any] = [kSecValueData as String: data]
+                  if SecItemUpdate(base as CFDictionary, changes as CFDictionary) == errSecItemNotFound {
+                      var insert = base
+                      insert[kSecValueData as String] = data
+                      SecItemAdd(insert as CFDictionary, nil)
+                  }
+              }
+          }
+
+          // MARK: - App state
+
+          @MainActor
+          final class AppSettings: ObservableObject {
+              private let defaults = UserDefaults.standard
+
+              @Published var selectedProvider: ProviderID { didSet { defaults.set(selectedProvider.rawValue, forKey: "selectedProvider") } }
+              @Published var geminiModel: String { didSet { defaults.set(geminiModel, forKey: "geminiModel") } }
+              @Published var groqModel: String { didSet { defaults.set(groqModel, forKey: "groqModel") } }
+              @Published var openRouterModel: String { didSet { defaults.set(openRouterModel, forKey: "openRouterModel") } }
+              @Published var siliconModel: String { didSet { defaults.set(siliconModel, forKey: "siliconModel") } }
+              @Published var customModel: String { didSet { defaults.set(customModel, forKey: "customModel") } }
+              @Published var customBaseURL: String { didSet { defaults.set(customBaseURL, forKey: "customBaseURL") } }
+              @Published var imageModel: String { didSet { defaults.set(imageModel, forKey: "imageModel") } }
+              @Published var imageEditModel: String { didSet { defaults.set(imageEditModel, forKey: "imageEditModel") } }
+              @Published var systemPrompt: String { didSet { defaults.set(systemPrompt, forKey: "systemPrompt") } }
+              @Published var localDailyLimit: Int { didSet { defaults.set(localDailyLimit, forKey: "localDailyLimit") } }
+              @Published private(set) var keyRevision = 0
+
+              init() {
+                  selectedProvider = ProviderID(rawValue: defaults.string(forKey: "selectedProvider") ?? "auto") ?? .auto
+                  geminiModel = defaults.string(forKey: "geminiModel") ?? "gemini-3.7-flash"
+                  groqModel = defaults.string(forKey: "groqModel") ?? "qwen/qwen3.6-27b"
+                  openRouterModel = defaults.string(forKey: "openRouterModel") ?? "openrouter/free"
+                  siliconModel = defaults.string(forKey: "siliconModel") ?? "Qwen/Qwen3-8B"
+                  customModel = defaults.string(forKey: "customModel") ?? ""
+                  customBaseURL = defaults.string(forKey: "customBaseURL") ?? "https://api.example.com/v1"
+                  imageModel = defaults.string(forKey: "imageModel") ?? "zimage"
+                  imageEditModel = defaults.string(forKey: "imageEditModel") ?? "kontext"
+                  systemPrompt = defaults.string(forKey: "systemPrompt") ?? "You are a powerful personal AI assistant. Answer accurately in the user's language. When a document is attached, analyze only the supplied content and clearly state uncertainty."
+                  let storedLimit = defaults.integer(forKey: "localDailyLimit")
+                  localDailyLimit = storedLimit == 0 ? 200 : storedLimit
+              }
+
+              func key(for provider: ProviderID) -> String {
+                  KeychainStore.read(provider.rawValue)
+              }
+
+              func setKey(_ value: String, for provider: ProviderID) {
+                  KeychainStore.write(value.trimmingCharacters(in: .whitespacesAndNewlines), account: provider.rawValue)
+                  keyRevision += 1
+              }
+
+              var pollinationsKey: String { KeychainStore.read("pollinations") }
+
+              func setPollinationsKey(_ value: String) {
+                  KeychainStore.write(value.trimmingCharacters(in: .whitespacesAndNewlines), account: "pollinations")
+                  keyRevision += 1
+              }
+
+              func model(for provider: ProviderID) -> String {
+                  switch provider {
+                  case .gemini: return geminiModel
+                  case .groq: return groqModel
+                  case .openRouter: return openRouterModel
+                  case .siliconFlow: return siliconModel
+                  case .custom: return customModel
+                  case .auto: return ""
+                  }
+              }
+
+              func baseURL(for provider: ProviderID) -> String {
+                  switch provider {
+                  case .groq: return "https://api.groq.com/openai/v1"
+                  case .openRouter: return "https://openrouter.ai/api/v1"
+                  case .siliconFlow: return "https://api.siliconflow.com/v1"
+                  case .custom: return customBaseURL
+                  default: return ""
+                  }
+              }
+          }
+
+          @MainActor
+          final class ChatStore: ObservableObject {
+              @Published var messages: [ChatMessage] = [] { didSet { save() } }
+              @Published var isSending = false
+
+              private let storageKey = "chatMessagesV1"
+
+              init() {
+                  if let data = UserDefaults.standard.data(forKey: storageKey),
+                     let decoded = try? JSONDecoder().decode([ChatMessage].self, from: data) {
+                      messages = decoded
+                  }
+              }
+
+              private func save() {
+                  let limited = Array(messages.suffix(100))
+                  if let data = try? JSONEncoder().encode(limited) {
+                      UserDefaults.standard.set(data, forKey: storageKey)
+                  }
+              }
+
+              func clear() { messages = [] }
+          }
+
+          @MainActor
+          final class AttachmentStore: ObservableObject {
+              @Published var current: InputAttachment?
+              @Published var isLoading = false
+          }
+
+          @MainActor
+          final class UsageLedger: ObservableObject {
+              @Published private(set) var total = 0
+              @Published private(set) var byProvider: [String: Int] = [:]
+
+              private let defaults = UserDefaults.standard
+              private let dayKey = "usageDay"
+              private let countsKey = "usageCounts"
+
+              init() { refresh() }
+
+              private var today: String {
+                  let formatter = DateFormatter()
+                  formatter.calendar = .current
+                  formatter.locale = Locale(identifier: "en_US_POSIX")
+                  formatter.dateFormat = "yyyy-MM-dd"
+                  return formatter.string(from: Date())
+              }
+
+              func refresh() {
+                  if defaults.string(forKey: dayKey) != today {
+                      defaults.set(today, forKey: dayKey)
+                      defaults.removeObject(forKey: countsKey)
+                  }
+                  if let data = defaults.data(forKey: countsKey),
+                     let decoded = try? JSONDecoder().decode([String: Int].self, from: data) {
+                      byProvider = decoded
+                  } else {
+                      byProvider = [:]
+                  }
+                  total = byProvider.values.reduce(0, +)
+              }
+
+              func canSend(limit: Int) -> Bool {
+                  refresh()
+                  return limit < 1 || total < limit
+              }
+
+              func record(_ provider: ProviderID) {
+                  record(label: provider.rawValue)
+              }
+
+              func record(label: String) {
+                  refresh()
+                  byProvider[label, default: 0] += 1
+                  total = byProvider.values.reduce(0, +)
+                  if let data = try? JSONEncoder().encode(byProvider) {
+                      defaults.set(data, forKey: countsKey)
+                  }
+              }
+          }
+
+          // MARK: - AI API client
+
+          final class AIService {
+              static let shared = AIService()
+              private init() {}
+
+              @MainActor
+              func chat(
+                  history: [ChatMessage],
+                  prompt: String,
+                  attachment: InputAttachment?,
+                  selected: ProviderID,
+                  settings: AppSettings
+              ) async throws -> ChatResult {
+                  let effectivePrompt = makePrompt(prompt, attachment: attachment)
+                  let hasImage = attachment?.imageData != nil
+
+                  let candidates: [ProviderID]
+                  if selected == .auto {
+                      candidates = hasImage
+                          ? [.gemini, .groq, .openRouter, .siliconFlow, .custom]
+                          : [.groq, .gemini, .siliconFlow, .openRouter, .custom]
+                  } else {
+                      candidates = [selected]
+                  }
+
+                  var failures: [String] = []
+                  var attempted = false
+                  for provider in candidates {
+                      let key = settings.key(for: provider)
+                      if provider != .custom && key.isEmpty { continue }
+                      if provider == .custom && settings.customBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
+                      if settings.model(for: provider).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
+
+                      attempted = true
+                      do {
+                          let text: String
+                          if provider == .gemini {
+                              text = try await geminiChat(
+                                  history: history,
+                                  prompt: effectivePrompt,
+                                  attachment: attachment,
+                                  key: key,
+                                  model: settings.geminiModel,
+                                  systemPrompt: settings.systemPrompt
+                              )
+                          } else {
+                              text = try await openAIChat(
+                                  history: history,
+                                  prompt: effectivePrompt,
+                                  attachment: attachment,
+                                  provider: provider,
+                                  key: key,
+                                  model: settings.model(for: provider),
+                                  baseURL: settings.baseURL(for: provider),
+                                  systemPrompt: settings.systemPrompt
+                              )
+                          }
+                          guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                              throw ServiceError("The provider returned an empty response")
+                          }
+                          return ChatResult(text: text, provider: provider)
+                      } catch {
+                          failures.append("\(provider.shortTitle): \(error.localizedDescription)")
+                          if selected != .auto { throw error }
+                      }
+                  }
+
+                  if !attempted {
+                      throw ServiceError("Add at least one API key in Settings, and make sure its model name is filled in.")
+                  }
+                  throw ServiceError("All configured providers failed:\n" + failures.joined(separator: "\n"))
+              }
+
+              private func makePrompt(_ prompt: String, attachment: InputAttachment?) -> String {
+                  guard let attachment else { return prompt }
+                  let maxCharacters = 80_000
+                  let text = String(attachment.extractedText.prefix(maxCharacters))
+                  if text.isEmpty { return prompt }
+                  return """
+                  \(prompt)
+
+                  --- ATTACHED FILE: \(attachment.name) ---
+                  \(text)
+                  --- END ATTACHED FILE ---
+                  """
+              }
+
+              private func geminiChat(
+                  history: [ChatMessage],
+                  prompt: String,
+                  attachment: InputAttachment?,
+                  key: String,
+                  model: String,
+                  systemPrompt: String
+              ) async throws -> String {
+                  guard let encodedModel = model.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+                        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(encodedModel):generateContent") else {
+                      throw ServiceError("Invalid Gemini model name")
+                  }
+
+                  var contents: [[String: Any]] = history.suffix(20).map { message in
+                      [
+                          "role": message.role == .assistant ? "model" : "user",
+                          "parts": [["text": message.text]]
+                      ]
+                  }
+
+                  var finalParts: [[String: Any]] = [["text": prompt]]
+                  if let data = attachment?.imageData {
+                      finalParts.append([
+                          "inlineData": [
+                              "mimeType": attachment?.mimeType ?? "image/jpeg",
+                              "data": data.base64EncodedString()
+                          ]
+                      ])
+                  }
+                  contents.append(["role": "user", "parts": finalParts])
+
+                  let body: [String: Any] = [
+                      "systemInstruction": ["parts": [["text": systemPrompt]]],
+                      "contents": contents,
+                      "generationConfig": ["temperature": 0.6, "maxOutputTokens": 4096]
+                  ]
+
+                  var request = URLRequest(url: url)
+                  request.httpMethod = "POST"
+                  request.timeoutInterval = 180
+                  request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                  request.setValue(key, forHTTPHeaderField: "x-goog-api-key")
+                  request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+                  let json = try await performJSON(request)
+                  guard let candidates = json["candidates"] as? [[String: Any]],
+                        let content = candidates.first?["content"] as? [String: Any],
+                        let parts = content["parts"] as? [[String: Any]] else {
+                      throw ServiceError(apiMessage(json) ?? "Gemini response format was not recognized")
+                  }
+                  return parts.compactMap { $0["text"] as? String }.joined(separator: "\n")
+              }
+
+              private func openAIChat(
+                  history: [ChatMessage],
+                  prompt: String,
+                  attachment: InputAttachment?,
+                  provider: ProviderID,
+                  key: String,
+                  model: String,
+                  baseURL: String,
+                  systemPrompt: String
+              ) async throws -> String {
+                  let endpointString: String
+                  let trimmed = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                  if trimmed.hasSuffix("chat/completions") {
+                      endpointString = trimmed
+                  } else {
+                      endpointString = trimmed + "/chat/completions"
+                  }
+                  guard let url = URL(string: endpointString) else { throw ServiceError("Invalid base URL") }
+
+                  var messages: [[String: Any]] = [["role": "system", "content": systemPrompt]]
+                  messages += history.suffix(20).map { message in
+                      ["role": message.role.rawValue, "content": message.text]
+                  }
+
+                  if let data = attachment?.imageData, provider != .siliconFlow {
+                      messages.append([
+                          "role": "user",
+                          "content": [
+                              ["type": "text", "text": prompt],
+                              [
+                                  "type": "image_url",
+                                  "image_url": ["url": "data:\(attachment?.mimeType ?? "image/jpeg");base64,\(data.base64EncodedString())"]
+                              ]
+                          ]
+                      ])
+                  } else {
+                      messages.append(["role": "user", "content": prompt])
+                  }
+
+                  let body: [String: Any] = [
+                      "model": model,
+                      "messages": messages,
+                      "temperature": 0.6,
+                      "max_tokens": 4096
+                  ]
+
+                  var request = URLRequest(url: url)
+                  request.httpMethod = "POST"
+                  request.timeoutInterval = 180
+                  request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                  if !key.isEmpty { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+                  if provider == .openRouter {
+                      request.setValue("AI Hub iOS", forHTTPHeaderField: "X-Title")
+                  }
+                  request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+                  let json = try await performJSON(request)
+                  guard let choices = json["choices"] as? [[String: Any]],
+                        let message = choices.first?["message"] as? [String: Any] else {
+                      throw ServiceError(apiMessage(json) ?? "OpenAI-compatible response format was not recognized")
+                  }
+                  if let content = message["content"] as? String { return content }
+                  if let blocks = message["content"] as? [[String: Any]] {
+                      return blocks.compactMap { ($0["text"] as? String) ?? ($0["content"] as? String) }.joined(separator: "\n")
+                  }
+                  throw ServiceError("The provider returned no text")
+              }
+
+              private func performJSON(_ request: URLRequest) async throws -> [String: Any] {
+                  let (data, response) = try await URLSession.shared.data(for: request)
+                  guard let http = response as? HTTPURLResponse else { throw ServiceError("No HTTP response") }
+                  let json = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any]) ?? [:]
+                  guard (200...299).contains(http.statusCode) else {
+                      let fallback = String(data: data, encoding: .utf8) ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
+                      throw ServiceError(apiMessage(json) ?? fallback, statusCode: http.statusCode)
+                  }
+                  return json
+              }
+
+              private func apiMessage(_ json: [String: Any]) -> String? {
+                  if let error = json["error"] as? [String: Any] {
+                      return (error["message"] as? String) ?? (error["detail"] as? String)
+                  }
+                  return json["message"] as? String
+              }
+          }
+
+          // MARK: - Pollinations image client
+
+          final class ImageAIService {
+              static let shared = ImageAIService()
+              private init() {}
+
+              func generate(prompt: String, model: String, apiKey: String) async throws -> UIImage {
+                  guard !apiKey.isEmpty else {
+                      throw ServiceError("Add a Pollinations publishable app key in Settings before generating images.")
+                  }
+                  let promptPathCharacters = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "/?#"))
+                  guard let escaped = prompt.addingPercentEncoding(withAllowedCharacters: promptPathCharacters),
+                        var components = URLComponents(string: "https://gen.pollinations.ai/image/\(escaped)") else {
+                      throw ServiceError("Invalid image prompt")
+                  }
+                  components.queryItems = [
+                      URLQueryItem(name: "model", value: model),
+                      URLQueryItem(name: "width", value: "1024"),
+                      URLQueryItem(name: "height", value: "1024"),
+                      URLQueryItem(name: "safe", value: "true"),
+                      URLQueryItem(name: "seed", value: "-1")
+                  ]
+                  guard let url = components.url else { throw ServiceError("Could not create image URL") }
+                  var request = URLRequest(url: url)
+                  request.timeoutInterval = 300
+                  if !apiKey.isEmpty { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
+                  let (data, response) = try await URLSession.shared.data(for: request)
+                  guard let http = response as? HTTPURLResponse else { throw ServiceError("No image response") }
+                  guard (200...299).contains(http.statusCode), let image = UIImage(data: data) else {
+                      let message = parseError(data) ?? "Image generation failed"
+                      throw ServiceError(message, statusCode: http.statusCode)
+                  }
+                  return image
+              }
+
+              func edit(imageData: Data, prompt: String, model: String, apiKey: String) async throws -> UIImage {
+                  guard !apiKey.isEmpty else {
+                      throw ServiceError("Pollinations image editing requires a publishable app key. Add it in Settings.")
+                  }
+                  guard let url = URL(string: "https://gen.pollinations.ai/v1/images/edits") else {
+                      throw ServiceError("Invalid edit endpoint")
+                  }
+                  let boundary = "Boundary-\(UUID().uuidString)"
+                  var body = Data()
+
+                  func addField(_ name: String, _ value: String) {
+                      body.append("--\(boundary)\r\n".data(using: .utf8)!)
+                      body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
+                      body.append("\(value)\r\n".data(using: .utf8)!)
+                  }
+
+                  addField("prompt", prompt)
+                  addField("model", model)
+                  addField("size", "1024x1024")
+                  addField("response_format", "b64_json")
+                  body.append("--\(boundary)\r\n".data(using: .utf8)!)
+                  body.append("Content-Disposition: form-data; name=\"image\"; filename=\"source.jpg\"\r\n".data(using: .utf8)!)
+                  body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+                  body.append(imageData)
+                  body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+
+                  var request = URLRequest(url: url)
+                  request.httpMethod = "POST"
+                  request.timeoutInterval = 300
+                  request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+                  request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+                  request.httpBody = body
+
+                  let (data, response) = try await URLSession.shared.data(for: request)
+                  guard let http = response as? HTTPURLResponse else { throw ServiceError("No edit response") }
+                  guard (200...299).contains(http.statusCode) else {
+                      throw ServiceError(parseError(data) ?? "Image editing failed", statusCode: http.statusCode)
+                  }
+                  if let image = UIImage(data: data) { return image }
+                  guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                        let items = json["data"] as? [[String: Any]],
+                        let first = items.first else {
+                      throw ServiceError("Image edit response was not recognized")
+                  }
+                  if let base64 = first["b64_json"] as? String,
+                     let decoded = Data(base64Encoded: base64),
+                     let image = UIImage(data: decoded) { return image }
+                  if let string = first["url"] as? String, let remoteURL = URL(string: string) {
+                      let (remoteData, _) = try await URLSession.shared.data(from: remoteURL)
+                      if let image = UIImage(data: remoteData) { return image }
+                  }
+                  throw ServiceError("No image found in edit response")
+              }
+
+              private func parseError(_ data: Data) -> String? {
+                  guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+                      return String(data: data, encoding: .utf8)
+                  }
+                  if let error = json["error"] as? [String: Any] { return error["message"] as? String }
+                  if let error = json["error"] as? String { return error }
+                  return json["message"] as? String
+              }
+          }
+
+          // MARK: - Document extraction
+
+          enum SupportedDocumentTypes {
+              static let all: [UTType] = {
+                  var values: [UTType] = [.pdf, .plainText, .commaSeparatedText, .image, .data]
+                  for ext in ["xlsx", "xlsm", "docx", "pptx", "csv", "tsv", "json", "md"] {
+                      if let type = UTType(filenameExtension: ext) { values.append(type) }
+                  }
+                  return values
+              }()
+          }
+
+          enum DocumentExtractor {
+              static func extract(from url: URL) async throws -> ExtractionResult {
+                  let access = url.startAccessingSecurityScopedResource()
+                  defer { if access { url.stopAccessingSecurityScopedResource() } }
+
+                  let ext = url.pathExtension.lowercased()
+                  let name = url.lastPathComponent
+
+                  switch ext {
+                  case "pdf":
+                      let text = try await extractPDF(url)
+                      return ExtractionResult(name: name, mimeType: "application/pdf", text: text, imageData: nil)
+                  case "xlsx", "xlsm":
+                      return ExtractionResult(name: name, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", text: try extractXLSX(url), imageData: nil)
+                  case "docx":
+                      return ExtractionResult(name: name, mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", text: try extractDOCX(url), imageData: nil)
+                  case "pptx":
+                      return ExtractionResult(name: name, mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", text: try extractPPTX(url), imageData: nil)
+                  case "jpg", "jpeg", "png", "heic", "heif", "webp":
+                      let data = try Data(contentsOf: url)
+                      guard let image = UIImage(data: data) else { throw ServiceError("Unsupported image") }
+                      let text = (try? await recognizeText(image)) ?? ""
+                      return ExtractionResult(name: name, mimeType: "image/jpeg", text: text, imageData: normalizedImageData(image, original: data))
+                  default:
+                      let data = try Data(contentsOf: url)
+                      guard let text = decodeText(data) else {
+                          throw ServiceError("This file type cannot be extracted locally. Convert old .xls/.doc files to .xlsx/.docx first.")
+                      }
+                      return ExtractionResult(name: name, mimeType: mimeType(for: ext), text: text, imageData: nil)
+                  }
+              }
+
+              static func extractImageData(_ data: Data, name: String = "Photo.jpg") async -> InputAttachment? {
+                  guard let image = UIImage(data: data) else { return nil }
+                  let text = (try? await recognizeText(image)) ?? ""
+                  return InputAttachment(name: name, mimeType: "image/jpeg", extractedText: text, imageData: normalizedImageData(image, original: data))
+              }
+
+              private static func extractPDF(_ url: URL) async throws -> String {
+                  guard let document = PDFDocument(url: url) else { throw ServiceError("Could not open PDF") }
+                  var pages: [String] = []
+                  for index in 0..<document.pageCount {
+                      if let text = document.page(at: index)?.string, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                          pages.append("[Page \(index + 1)]\n\(text)")
+                      }
+                  }
+                  if !pages.isEmpty { return pages.joined(separator: "\n\n") }
+
+                  // Scanned PDF fallback: OCR the first 25 pages to keep memory and API prompts reasonable.
+                  for index in 0..<min(document.pageCount, 25) {
+                      guard let page = document.page(at: index) else { continue }
+                      let image = page.thumbnail(of: CGSize(width: 1800, height: 2400), for: .mediaBox)
+                      let text = (try? await recognizeText(image)) ?? ""
+                      pages.append("[OCR Page \(index + 1)]\n\(text)")
+                  }
+                  return pages.joined(separator: "\n\n")
+              }
+
+              private static func extractXLSX(_ url: URL) throws -> String {
+                  guard let archive = Archive(url: url, accessMode: .read) else { throw ServiceError("Could not open Excel archive") }
+                  var sharedStrings: [String] = []
+                  if let entry = archive["xl/sharedStrings.xml"] {
+                      let data = try data(from: entry, in: archive)
+                      let delegate = SharedStringsXMLDelegate()
+                      let parser = XMLParser(data: data)
+                      parser.delegate = delegate
+                      parser.parse()
+                      sharedStrings = delegate.strings
+                  }
+
+                  let sheets = archive
+                      .filter { $0.path.hasPrefix("xl/worksheets/sheet") && $0.path.hasSuffix(".xml") }
+                      .sorted { naturalOrder($0.path, $1.path) }
+                  guard !sheets.isEmpty else { throw ServiceError("No worksheets found") }
+
+                  var output: [String] = []
+                  for (index, entry) in sheets.enumerated() {
+                      let delegate = WorksheetXMLDelegate(sharedStrings: sharedStrings)
+                      let parser = XMLParser(data: try data(from: entry, in: archive))
+                      parser.delegate = delegate
+                      parser.parse()
+                      output.append("=== Sheet \(index + 1) ===\n" + delegate.lines.joined(separator: "\n"))
+                  }
+                  return output.joined(separator: "\n\n")
+              }
+
+              private static func extractDOCX(_ url: URL) throws -> String {
+                  guard let archive = Archive(url: url, accessMode: .read), let entry = archive["word/document.xml"] else {
+                      throw ServiceError("Could not open Word document")
+                  }
+                  return parseOfficeText(try data(from: entry, in: archive), paragraphElements: ["p"])
+              }
+
+              private static func extractPPTX(_ url: URL) throws -> String {
+                  guard let archive = Archive(url: url, accessMode: .read) else { throw ServiceError("Could not open PowerPoint") }
+                  let slides = archive
+                      .filter { $0.path.hasPrefix("ppt/slides/slide") && $0.path.hasSuffix(".xml") }
+                      .sorted { naturalOrder($0.path, $1.path) }
+                  var output: [String] = []
+                  for (index, entry) in slides.enumerated() {
+                      let text = parseOfficeText(try data(from: entry, in: archive), paragraphElements: ["p"])
+                      output.append("=== Slide \(index + 1) ===\n\(text)")
+                  }
+                  return output.joined(separator: "\n\n")
+              }
+
+              private static func parseOfficeText(_ data: Data, paragraphElements: Set<String>) -> String {
+                  let delegate = OfficeTextXMLDelegate(paragraphElements: paragraphElements)
+                  let parser = XMLParser(data: data)
+                  parser.delegate = delegate
+                  parser.parse()
+                  return delegate.text.trimmingCharacters(in: .whitespacesAndNewlines)
+              }
+
+              private static func data(from entry: Entry, in archive: Archive) throws -> Data {
+                  var result = Data()
+                  _ = try archive.extract(entry) { chunk in result.append(chunk) }
+                  return result
+              }
+
+              private static func recognizeText(_ image: UIImage) async throws -> String {
+                  guard let cgImage = image.cgImage else { throw ServiceError("Could not decode image") }
+                  return try await withCheckedThrowingContinuation { continuation in
+                      let request = VNRecognizeTextRequest { request, error in
+                          if let error {
+                              continuation.resume(throwing: error)
+                              return
+                          }
+                          let observations = request.results as? [VNRecognizedTextObservation] ?? []
+                          let lines = observations.compactMap { $0.topCandidates(1).first?.string }
+                          continuation.resume(returning: lines.joined(separator: "\n"))
+                      }
+                      request.recognitionLevel = .accurate
+                      request.usesLanguageCorrection = true
+                      request.recognitionLanguages = ["ar-SA", "en-US"]
+                      DispatchQueue.global(qos: .userInitiated).async {
+                          do {
+                              try VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
+                          } catch {
+                              continuation.resume(throwing: error)
+                          }
+                      }
+                  }
+              }
+
+              private static func normalizedImageData(_ image: UIImage, original: Data) -> Data {
+                  let maxDimension: CGFloat = 2048
+                  let size = image.size
+                  let scale = min(1, maxDimension / max(size.width, size.height))
+                  guard scale < 1 else { return image.jpegData(compressionQuality: 0.86) ?? original }
+                  let target = CGSize(width: size.width * scale, height: size.height * scale)
+                  let renderer = UIGraphicsImageRenderer(size: target)
+                  let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: target)) }
+                  return resized.jpegData(compressionQuality: 0.84) ?? original
+              }
+
+              private static func decodeText(_ data: Data) -> String? {
+                  if let value = String(data: data, encoding: .utf8) { return value }
+                  if let value = String(data: data, encoding: .utf16) { return value }
+                  if let value = String(data: data, encoding: .isoLatin1) { return value }
+                  return nil
+              }
+
+              private static func mimeType(for ext: String) -> String {
+                  switch ext {
+                  case "jpg", "jpeg": return "image/jpeg"
+                  case "png": return "image/png"
+                  case "heic", "heif": return "image/heic"
+                  case "webp": return "image/webp"
+                  case "csv": return "text/csv"
+                  case "json": return "application/json"
+                  default: return "text/plain"
+                  }
+              }
+
+              private static func naturalOrder(_ lhs: String, _ rhs: String) -> Bool {
+                  lhs.localizedStandardCompare(rhs) == .orderedAscending
+              }
+          }
+
+          private final class SharedStringsXMLDelegate: NSObject, XMLParserDelegate {
+              var strings: [String] = []
+              private var current = ""
+              private var inString = false
+              private var inText = false
+
+              func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
+                  let name = elementName.split(separator: ":").last.map(String.init) ?? elementName
+                  if name == "si" { current = ""; inString = true }
+                  if name == "t" && inString { inText = true }
+              }
+
+              func parser(_ parser: XMLParser, foundCharacters string: String) {
+                  if inText { current += string }
+              }
+
+              func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+                  let name = elementName.split(separator: ":").last.map(String.init) ?? elementName
+                  if name == "t" { inText = false }
+                  if name == "si" { strings.append(current); inString = false }
+              }
+          }
+
+          private final class WorksheetXMLDelegate: NSObject, XMLParserDelegate {
+              let sharedStrings: [String]
+              var lines: [String] = []
+              private var cells: [String] = []
+              private var cellType = ""
+              private var cellRef = ""
+              private var value = ""
+              private var inline = ""
+              private var inValue = false
+              private var inInlineText = false
+
+              init(sharedStrings: [String]) { self.sharedStrings = sharedStrings }
+
+              func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
+                  let name = elementName.split(separator: ":").last.map(String.init) ?? elementName
+                  switch name {
+                  case "row": cells = []
+                  case "c":
+                      cellType = attributeDict["t"] ?? ""
+                      cellRef = attributeDict["r"] ?? ""
+                      value = ""
+                      inline = ""
+                  case "v": inValue = true
+                  case "t": if cellType == "inlineStr" { inInlineText = true }
+                  default: break
+                  }
+              }
+
+              func parser(_ parser: XMLParser, foundCharacters string: String) {
+                  if inValue { value += string }
+                  if inInlineText { inline += string }
+              }
+
+              func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+                  let name = elementName.split(separator: ":").last.map(String.init) ?? elementName
+                  switch name {
+                  case "v": inValue = false
+                  case "t": inInlineText = false
+                  case "c":
+                      var displayed = inline.isEmpty ? value : inline
+                      if cellType == "s", let index = Int(value), sharedStrings.indices.contains(index) {
+                          displayed = sharedStrings[index]
+                      } else if cellType == "b" {
+                          displayed = value == "1" ? "TRUE" : "FALSE"
+                      }
+                      if !displayed.isEmpty { cells.append(cellRef.isEmpty ? displayed : "\(cellRef)=\(displayed)") }
+                  case "row": if !cells.isEmpty { lines.append(cells.joined(separator: " | ")) }
+                  default: break
+                  }
+              }
+          }
+
+          private final class OfficeTextXMLDelegate: NSObject, XMLParserDelegate {
+              let paragraphElements: Set<String>
+              var text = ""
+              private var inText = false
+
+              init(paragraphElements: Set<String>) { self.paragraphElements = paragraphElements }
+
+              func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
+                  let name = elementName.split(separator: ":").last.map(String.init) ?? elementName
+                  if name == "t" { inText = true }
+              }
+
+              func parser(_ parser: XMLParser, foundCharacters string: String) {
+                  if inText { text += string }
+              }
+
+              func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+                  let name = elementName.split(separator: ":").last.map(String.init) ?? elementName
+                  if name == "t" { inText = false; text += " " }
+                  if paragraphElements.contains(name) { text += "\n" }
+              }
+          }
+
+          // MARK: - UI
+
+          @main
+          struct AIHubApp: App {
+              @StateObject private var settings = AppSettings()
+              @StateObject private var chat = ChatStore()
+              @StateObject private var attachment = AttachmentStore()
+              @StateObject private var usage = UsageLedger()
+
+              var body: some Scene {
+                  WindowGroup {
+                      RootView()
+                          .environmentObject(settings)
+                          .environmentObject(chat)
+                          .environmentObject(attachment)
+                          .environmentObject(usage)
+                  }
+              }
+          }
+
+          struct RootView: View {
+              var body: some View {
+                  TabView {
+                      ChatView()
+                          .tabItem { Label("Chat", systemImage: "message.fill") }
+                      FilesView()
+                          .tabItem { Label("Files", systemImage: "doc.text.fill") }
+                      ImagesView()
+                          .tabItem { Label("Images", systemImage: "photo.fill.on.rectangle.fill") }
+                      SettingsView()
+                          .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+                  }
+                  .tint(.indigo)
+              }
+          }
+
+          struct ChatView: View {
+              @EnvironmentObject private var settings: AppSettings
+              @EnvironmentObject private var chat: ChatStore
+              @EnvironmentObject private var attachment: AttachmentStore
+              @EnvironmentObject private var usage: UsageLedger
+
+              @State private var input = ""
+              @State private var photoItem: PhotosPickerItem?
+              @State private var showFileImporter = false
+              @State private var errorMessage = ""
+              @State private var showError = false
+
+              var body: some View {
+                  NavigationStack {
+                      VStack(spacing: 0) {
+                          if chat.messages.isEmpty {
+                              Spacer()
+                              VStack(spacing: 14) {
+                                  Image(systemName: "sparkles")
+                                      .font(.system(size: 46, weight: .semibold))
+                                      .foregroundStyle(.indigo)
+                                  Text("AI Hub")
+                                      .font(.largeTitle.bold())
+                                  Text("Ask anything, attach an image, PDF, Excel, Word, PowerPoint, CSV, or text file.")
+                                      .multilineTextAlignment(.center)
+                                      .foregroundStyle(.secondary)
+                                      .padding(.horizontal, 28)
+                              }
+                              Spacer()
+                          } else {
+                              ScrollViewReader { proxy in
+                                  ScrollView {
+                                      LazyVStack(spacing: 12) {
+                                          ForEach(chat.messages) { message in
+                                              MessageBubble(message: message).id(message.id)
+                                          }
+                                          if chat.isSending {
+                                              HStack {
+                                                  ProgressView()
+                                                  Text("Thinking…").foregroundStyle(.secondary)
+                                                  Spacer()
+                                              }
+                                              .padding(.horizontal)
+                                          }
+                                      }
+                                      .padding(.vertical)
+                                  }
+                                  .onChange(of: chat.messages.count) { _ in
+                                      if let id = chat.messages.last?.id {
+                                          withAnimation { proxy.scrollTo(id, anchor: .bottom) }
+                                      }
+                                  }
+                              }
+                          }
+
+                          Divider()
+                          VStack(spacing: 8) {
+                              if attachment.isLoading {
+                                  HStack { ProgressView(); Text("Extracting attachment…"); Spacer() }
+                                      .font(.caption)
+                              } else if let item = attachment.current {
+                                  AttachmentChip(item: item) { attachment.current = nil }
+                              }
+
+                              HStack(alignment: .bottom, spacing: 10) {
+                                  Menu {
+                                      PhotosPicker(selection: $photoItem, matching: .images) {
+                                          Label("Photo Library", systemImage: "photo")
+                                      }
+                                      Button { showFileImporter = true } label: {
+                                          Label("Choose File", systemImage: "doc")
+                                      }
+                                  } label: {
+                                      Image(systemName: "paperclip.circle.fill")
+                                          .font(.title2)
+                                  }
+
+                                  TextField("Message", text: $input, axis: .vertical)
+                                      .lineLimit(1...5)
+                                      .textFieldStyle(.roundedBorder)
+
+                                  Button(action: send) {
+                                      Image(systemName: "arrow.up.circle.fill")
+                                          .font(.title)
+                                  }
+                                  .disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || chat.isSending || attachment.isLoading)
+                              }
+                              HStack {
+                                  Text("\(settings.selectedProvider.shortTitle) • Today \(usage.total)/\(settings.localDailyLimit)")
+                                      .font(.caption2)
+                                      .foregroundStyle(.secondary)
+                                  Spacer()
+                              }
+                          }
+                          .padding(10)
+                          .background(.ultraThinMaterial)
+                      }
+                      .navigationTitle("Chat / المحادثة")
+                      .toolbar {
+                          ToolbarItem(placement: .navigationBarTrailing) {
+                              Button(role: .destructive) { chat.clear() } label: { Image(systemName: "trash") }
+                                  .disabled(chat.messages.isEmpty)
+                          }
+                      }
+                  }
+                  .onChange(of: photoItem) { item in loadPhoto(item) }
+                  .fileImporter(isPresented: $showFileImporter, allowedContentTypes: SupportedDocumentTypes.all, allowsMultipleSelection: false) { result in
+                      switch result {
+                      case .success(let urls): if let url = urls.first { loadFile(url) }
+                      case .failure(let error): present(error.localizedDescription)
+                      }
+                  }
+                  .alert("Error", isPresented: $showError) { Button("OK", role: .cancel) {} } message: { Text(errorMessage) }
+              }
+
+              private func send() {
+                  let prompt = input.trimmingCharacters(in: .whitespacesAndNewlines)
+                  guard !prompt.isEmpty else { return }
+                  guard usage.canSend(limit: settings.localDailyLimit) else {
+                      present("Your local daily limit is reached. Change it in Settings or wait until tomorrow.")
+                      return
+                  }
+                  let history = chat.messages
+                  let currentAttachment = attachment.current
+                  input = ""
+                  chat.messages.append(ChatMessage(role: .user, text: prompt))
+                  chat.isSending = true
+
+                  Task {
+                      defer { chat.isSending = false }
+                      do {
+                          let result = try await AIService.shared.chat(
+                              history: history,
+                              prompt: prompt,
+                              attachment: currentAttachment,
+                              selected: settings.selectedProvider,
+                              settings: settings
+                          )
+                          chat.messages.append(ChatMessage(role: .assistant, text: result.text, provider: result.provider.shortTitle))
+                          usage.record(result.provider)
+                      } catch {
+                          present(error.localizedDescription)
+                      }
+                  }
+              }
+
+              private func loadPhoto(_ item: PhotosPickerItem?) {
+                  guard let item else { return }
+                  attachment.isLoading = true
+                  Task {
+                      defer { attachment.isLoading = false; photoItem = nil }
+                      do {
+                          guard let data = try await item.loadTransferable(type: Data.self),
+                                let result = await DocumentExtractor.extractImageData(data) else {
+                              throw ServiceError("Could not load photo")
+                          }
+                          attachment.current = result
+                      } catch { present(error.localizedDescription) }
+                  }
+              }
+
+              private func loadFile(_ url: URL) {
+                  attachment.isLoading = true
+                  Task {
+                      defer { attachment.isLoading = false }
+                      do {
+                          let result = try await DocumentExtractor.extract(from: url)
+                          attachment.current = InputAttachment(name: result.name, mimeType: result.mimeType, extractedText: result.text, imageData: result.imageData)
+                      } catch { present(error.localizedDescription) }
+                  }
+              }
+
+              private func present(_ message: String) {
+                  errorMessage = message
+                  showError = true
+              }
+          }
+
+          struct MessageBubble: View {
+              let message: ChatMessage
+
+              var body: some View {
+                  HStack {
+                      if message.role == .user { Spacer(minLength: 45) }
+                      VStack(alignment: .leading, spacing: 5) {
+                          Text(message.text).textSelection(.enabled)
+                          if let provider = message.provider {
+                              Text(provider).font(.caption2).foregroundStyle(.secondary)
+                          }
+                      }
+                      .padding(12)
+                      .background(message.role == .user ? Color.indigo : Color(.secondarySystemBackground))
+                      .foregroundStyle(message.role == .user ? Color.white : Color.primary)
+                      .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                      if message.role == .assistant { Spacer(minLength: 45) }
+                  }
+                  .padding(.horizontal)
+              }
+          }
+
+          struct AttachmentChip: View {
+              let item: InputAttachment
+              let remove: () -> Void
+
+              var body: some View {
+                  HStack {
+                      Image(systemName: item.isImage ? "photo" : "doc.text")
+                          .foregroundStyle(.indigo)
+                      VStack(alignment: .leading) {
+                          Text(item.name).font(.caption.bold()).lineLimit(1)
+                          Text(item.extractedText.isEmpty ? (item.isImage ? "Image attached" : "No text found") : "\(item.extractedText.count.formatted()) characters extracted")
+                              .font(.caption2).foregroundStyle(.secondary)
+                      }
+                      Spacer()
+                      Button(action: remove) { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                  }
+                  .padding(8)
+                  .background(Color(.secondarySystemBackground))
+                  .clipShape(RoundedRectangle(cornerRadius: 10))
+              }
+          }
+
+          struct FilesView: View {
+              @EnvironmentObject private var attachment: AttachmentStore
+              @State private var showImporter = false
+              @State private var previewText = ""
+              @State private var fileName = ""
+              @State private var errorMessage = ""
+              @State private var showError = false
+
+              var body: some View {
+                  NavigationStack {
+                      VStack(spacing: 16) {
+                          if attachment.isLoading {
+                              Spacer()
+                              ProgressView("Extracting file…")
+                              Spacer()
+                          } else if previewText.isEmpty {
+                              Spacer()
+                              Image(systemName: "doc.text.magnifyingglass")
+                                  .font(.system(size: 52)).foregroundStyle(.indigo)
+                              Text("Local Document Extraction").font(.title2.bold())
+                              Text("PDF (including OCR), XLSX/XLSM, DOCX, PPTX, CSV, JSON, Markdown, text, and images. Extraction happens on your iPhone before analysis.")
+                                  .multilineTextAlignment(.center).foregroundStyle(.secondary).padding(.horizontal)
+                              Button { showImporter = true } label: { Label("Choose File", systemImage: "folder") }
+                                  .buttonStyle(.borderedProminent)
+                              Spacer()
+                          } else {
+                              HStack {
+                                  VStack(alignment: .leading) {
+                                      Text(fileName).font(.headline).lineLimit(1)
+                                      Text("\(previewText.count.formatted()) characters").font(.caption).foregroundStyle(.secondary)
+                                  }
+                                  Spacer()
+                                  Button("Another") { showImporter = true }
+                              }
+                              .padding(.horizontal)
+                              ScrollView {
+                                  Text(previewText)
+                                      .font(.system(.footnote, design: .monospaced))
+                                      .frame(maxWidth: .infinity, alignment: .leading)
+                                      .textSelection(.enabled)
+                                      .padding()
+                              }
+                              .background(Color(.secondarySystemBackground))
+                              .clipShape(RoundedRectangle(cornerRadius: 14))
+                              .padding(.horizontal)
+                              Label("Ready in Chat as the current attachment", systemImage: "checkmark.circle.fill")
+                                  .font(.footnote).foregroundStyle(.green)
+                                  .padding(.bottom)
+                          }
+                      }
+                      .navigationTitle("Files / الملفات")
+                      .toolbar {
+                          ToolbarItem(placement: .navigationBarTrailing) {
+                              Button { showImporter = true } label: { Image(systemName: "plus") }
+                          }
+                      }
+                  }
+                  .fileImporter(isPresented: $showImporter, allowedContentTypes: SupportedDocumentTypes.all, allowsMultipleSelection: false) { result in
+                      switch result {
+                      case .success(let urls): if let url = urls.first { extract(url) }
+                      case .failure(let error): present(error.localizedDescription)
+                      }
+                  }
+                  .alert("Error", isPresented: $showError) { Button("OK", role: .cancel) {} } message: { Text(errorMessage) }
+              }
+
+              private func extract(_ url: URL) {
+                  attachment.isLoading = true
+                  Task {
+                      defer { attachment.isLoading = false }
+                      do {
+                          let result = try await DocumentExtractor.extract(from: url)
+                          let item = InputAttachment(name: result.name, mimeType: result.mimeType, extractedText: result.text, imageData: result.imageData)
+                          attachment.current = item
+                          fileName = result.name
+                          previewText = result.text.isEmpty && result.imageData != nil ? "Image loaded. No OCR text was detected, but a vision-capable AI can still analyze it." : result.text
+                      } catch { present(error.localizedDescription) }
+                  }
+              }
+
+              private func present(_ message: String) { errorMessage = message; showError = true }
+          }
+
+          struct ImagesView: View {
+              @EnvironmentObject private var settings: AppSettings
+              @EnvironmentObject private var usage: UsageLedger
+              @State private var prompt = ""
+              @State private var sourceItem: PhotosPickerItem?
+              @State private var sourceImage: UIImage?
+              @State private var sourceData: Data?
+              @State private var outputImage: UIImage?
+              @State private var isWorking = false
+              @State private var errorMessage = ""
+              @State private var showError = false
+              @State private var shareImage: ShareImage?
+
+              var body: some View {
+                  NavigationStack {
+                      ScrollView {
+                          VStack(spacing: 16) {
+                              GroupBox {
+                                  VStack(alignment: .leading, spacing: 10) {
+                                      Text(sourceImage == nil ? "Generate a new image" : "Describe how to edit the selected image")
+                                          .font(.headline)
+                                      TextField("Example: Replace the sky with a dramatic sunset", text: $prompt, axis: .vertical)
+                                          .lineLimit(2...6).textFieldStyle(.roundedBorder)
+                                      HStack {
+                                          PhotosPicker(selection: $sourceItem, matching: .images) {
+                                              Label(sourceImage == nil ? "Choose source" : "Change source", systemImage: "photo")
+                                          }
+                                          .buttonStyle(.bordered)
+                                          if sourceImage != nil {
+                                              Button("Remove", role: .destructive) { sourceImage = nil; sourceData = nil }
+                                          }
+                                          Spacer()
+                                      }
+                                  }
+                              }
+
+                              if let sourceImage {
+                                  VStack(alignment: .leading) {
+                                      Text("Source").font(.caption.bold()).foregroundStyle(.secondary)
+                                      Image(uiImage: sourceImage).resizable().scaledToFit().frame(maxHeight: 230).clipShape(RoundedRectangle(cornerRadius: 12))
+                                  }
+                              }
+
+                              Button(action: runImageAI) {
+                                  HStack {
+                                      if isWorking { ProgressView().tint(.white) }
+                                      Label(sourceImage == nil ? "Generate" : "AI Edit", systemImage: "wand.and.stars")
+                                  }
+                                  .frame(maxWidth: .infinity)
+                              }
+                              .buttonStyle(.borderedProminent)
+                              .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isWorking)
+
+                              if let outputImage {
+                                  VStack(spacing: 10) {
+                                      Image(uiImage: outputImage)
+                                          .resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 16))
+                                      HStack {
+                                          Button { saveToPhotos(outputImage) } label: { Label("Save", systemImage: "square.and.arrow.down") }
+                                          Spacer()
+                                          Button { shareImage = ShareImage(image: outputImage) } label: { Label("Share", systemImage: "square.and.arrow.up") }
+                                      }
+                                      .buttonStyle(.bordered)
+                                  }
+                              }
+
+                              Text("Generation uses Pollinations (default: \(settings.imageModel)). AI editing uses \(settings.imageEditModel) and a Pollinations publishable key. Free quotas and model availability can change.")
+                                  .font(.caption).foregroundStyle(.secondary)
+                          }
+                          .padding()
+                      }
+                      .navigationTitle("Images / الصور")
+                  }
+                  .onChange(of: sourceItem) { item in loadSource(item) }
+                  .sheet(item: $shareImage) { item in ShareSheet(items: [item.image]) }
+                  .alert("Image Error", isPresented: $showError) { Button("OK", role: .cancel) {} } message: { Text(errorMessage) }
+              }
+
+              private func loadSource(_ item: PhotosPickerItem?) {
+                  guard let item else { return }
+                  Task {
+                      defer { sourceItem = nil }
+                      do {
+                          guard let data = try await item.loadTransferable(type: Data.self), let image = UIImage(data: data) else {
+                              throw ServiceError("Could not load source image")
+                          }
+                          sourceImage = image
+                          sourceData = image.jpegData(compressionQuality: 0.9) ?? data
+                      } catch { present(error.localizedDescription) }
+                  }
+              }
+
+              private func runImageAI() {
+                  let clean = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                  guard !clean.isEmpty else { return }
+                  guard usage.canSend(limit: settings.localDailyLimit) else {
+                      present("Your local daily limit is reached. Change it in Settings or wait until tomorrow.")
+                      return
+                  }
+                  isWorking = true
+                  Task {
+                      defer { isWorking = false }
+                      do {
+                          if let data = sourceData {
+                              outputImage = try await ImageAIService.shared.edit(imageData: data, prompt: clean, model: settings.imageEditModel, apiKey: settings.pollinationsKey)
+                          } else {
+                              outputImage = try await ImageAIService.shared.generate(prompt: clean, model: settings.imageModel, apiKey: settings.pollinationsKey)
+                          }
+                          usage.record(label: "pollinations")
+                      } catch { present(error.localizedDescription) }
+                  }
+              }
+
+              private func saveToPhotos(_ image: UIImage) {
+                  Task {
+                      do {
+                          let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+                          guard status == .authorized || status == .limited else { throw ServiceError("Photo Library permission was denied") }
+                          try await PHPhotoLibrary.shared().performChanges {
+                              PHAssetChangeRequest.creationRequestForAsset(from: image)
+                          }
+                      } catch { present(error.localizedDescription) }
+                  }
+              }
+
+              private func present(_ message: String) { errorMessage = message; showError = true }
+          }
+
+          struct ShareImage: Identifiable {
+              let id = UUID()
+              let image: UIImage
+          }
+
+          struct ShareSheet: UIViewControllerRepresentable {
+              let items: [Any]
+              func makeUIViewController(context: Context) -> UIActivityViewController { UIActivityViewController(activityItems: items, applicationActivities: nil) }
+              func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+          }
+
+          struct SettingsView: View {
+              @EnvironmentObject private var settings: AppSettings
+              @EnvironmentObject private var usage: UsageLedger
+
+              @State private var geminiKey = ""
+              @State private var groqKey = ""
+              @State private var openRouterKey = ""
+              @State private var siliconKey = ""
+              @State private var customKey = ""
+              @State private var pollinationsKey = ""
+              @State private var saved = false
+
+              var body: some View {
+                  NavigationStack {
+                      Form {
+                          Section("Routing") {
+                              Picker("Provider", selection: $settings.selectedProvider) {
+                                  ForEach(ProviderID.allCases) { provider in Text(provider.title).tag(provider) }
+                              }
+                              Stepper("Local daily cap: \(settings.localDailyLimit)", value: $settings.localDailyLimit, in: 1...5000, step: 25)
+                              LabeledContent("Used today", value: "\(usage.total)")
+                              Text("Auto tries configured providers in order and falls back after quota, capacity, or API errors. This counter is an on-device safety cap; provider quotas are enforced by each service.")
+                                  .font(.caption).foregroundStyle(.secondary)
+                          }
+
+                          providerSection(
+                              title: "Google Gemini — text + vision",
+                              key: $geminiKey,
+                              model: $settings.geminiModel,
+                              note: "Gemini 3.7 Flash currently has a free API tier in eligible regions. Exact RPM/RPD varies by model/project. Free-tier prompts may be used to improve Google products."
+                          )
+
+                          providerSection(
+                              title: "Groq — very fast",
+                              key: $groqKey,
+                              model: $settings.groqModel,
+                              note: "The free plan is rate-limited by model. The default Qwen 3.6 model supports text and up to three images; check your Groq Limits page for the live quota."
+                          )
+
+                          providerSection(
+                              title: "OpenRouter — rotating free models",
+                              key: $openRouterKey,
+                              model: $settings.openRouterModel,
+                              note: "openrouter/free automatically chooses a compatible free model. New accounts are normally limited across free models; availability and the free roster rotate."
+                          )
+
+                          providerSection(
+                              title: "SiliconFlow / SiliconCloud",
+                              key: $siliconKey,
+                              model: $settings.siliconModel,
+                              note: "Use a model currently marked $0 in the SiliconFlow console. The default Qwen3-8B is text-only; free models and fixed rate limits can change."
+                          )
+
+                          Section("Pollinations — image generation/editing") {
+                              SecureField("Publishable app key (pk_…)", text: $pollinationsKey)
+                                  .textInputAutocapitalization(.never).autocorrectionDisabled()
+                              TextField("Generation model", text: $settings.imageModel)
+                                  .textInputAutocapitalization(.never).autocorrectionDisabled()
+                              TextField("Editing model", text: $settings.imageEditModel)
+                                  .textInputAutocapitalization(.never).autocorrectionDisabled()
+                              Text("A key may be optional for light image generation, but editing requires a publishable app key and may consume free Pollen/credits. Never put a secret sk_ server key in an iPhone app.")
+                                  .font(.caption).foregroundStyle(.secondary)
+                          }
+
+                          Section("Custom OpenAI-compatible API") {
+                              TextField("Base URL", text: $settings.customBaseURL)
+                                  .textInputAutocapitalization(.never).autocorrectionDisabled()
+                              TextField("Model", text: $settings.customModel)
+                                  .textInputAutocapitalization(.never).autocorrectionDisabled()
+                              SecureField("API key (optional)", text: $customKey)
+                                  .textInputAutocapitalization(.never).autocorrectionDisabled()
+                          }
+
+                          Section("Assistant") {
+                              TextField("System prompt", text: $settings.systemPrompt, axis: .vertical).lineLimit(3...9)
+                          }
+
+                          Section {
+                              Button {
+                                  saveKeys()
+                              } label: {
+                                  HStack { Spacer(); Label(saved ? "Saved" : "Save Keys", systemImage: saved ? "checkmark.circle.fill" : "key.fill"); Spacer() }
+                              }
+                          } footer: {
+                              Text("Keys are stored in iOS Keychain, not UserDefaults or the build file. Client-side keys are suitable for a personal app only; use your own backend before distributing the app to other people. Free does not mean unlimited, permanent, or private.")
+                          }
+
+                          Section("Current free-tier reality") {
+                              Text("Best stack: Gemini for multimodal/long documents, Groq for speed, OpenRouter for rotating free models, SiliconFlow for selected $0 open models, and Pollinations for images. Cerebras currently offers a time-limited credit trial rather than a renewing always-free API tier, so it is not a default provider here.")
+                                  .font(.footnote)
+                          }
+                      }
+                      .navigationTitle("Settings / الإعدادات")
+                  }
+                  .onAppear(perform: loadKeys)
+              }
+
+              @ViewBuilder
+              private func providerSection(title: String, key: Binding<String>, model: Binding<String>, note: String) -> some View {
+                  Section {
+                      SecureField("API key", text: key)
+                          .textInputAutocapitalization(.never).autocorrectionDisabled()
+                      TextField("Model ID", text: model)
+                          .textInputAutocapitalization(.never).autocorrectionDisabled()
+                      Text(note).font(.caption).foregroundStyle(.secondary)
+                  } header: {
+                      Text(title)
+                  }
+              }
+
+              private func loadKeys() {
+                  geminiKey = settings.key(for: .gemini)
+                  groqKey = settings.key(for: .groq)
+                  openRouterKey = settings.key(for: .openRouter)
+                  siliconKey = settings.key(for: .siliconFlow)
+                  customKey = settings.key(for: .custom)
+                  pollinationsKey = settings.pollinationsKey
+              }
+
+              private func saveKeys() {
+                  settings.setKey(geminiKey, for: .gemini)
+                  settings.setKey(groqKey, for: .groq)
+                  settings.setKey(openRouterKey, for: .openRouter)
+                  settings.setKey(siliconKey, for: .siliconFlow)
+                  settings.setKey(customKey, for: .custom)
+                  settings.setPollinationsKey(pollinationsKey)
+                  saved = true
+                  DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { saved = false }
+              }
+          }
+          SWIFT_SOURCE
+
+          mkdir -p GeneratedApp/Sources/Assets.xcassets/AppIcon.appiconset
+          cat > GeneratedApp/Sources/Assets.xcassets/Contents.json <<'ASSET_ROOT'
+          {"info":{"author":"xcode","version":1}}
+          ASSET_ROOT
+          cat > GeneratedApp/Sources/Assets.xcassets/AppIcon.appiconset/Contents.json <<'APPICON_JSON'
+          {
+            "images": [
+              {"filename":"icon-40.png",   "idiom":"iphone", "scale":"2x", "size":"20x20"},
+              {"filename":"icon-60.png",   "idiom":"iphone", "scale":"3x", "size":"20x20"},
+              {"filename":"icon-58.png",   "idiom":"iphone", "scale":"2x", "size":"29x29"},
+              {"filename":"icon-87.png",   "idiom":"iphone", "scale":"3x", "size":"29x29"},
+              {"filename":"icon-80.png",   "idiom":"iphone", "scale":"2x", "size":"40x40"},
+              {"filename":"icon-120.png",  "idiom":"iphone", "scale":"3x", "size":"40x40"},
+              {"filename":"icon-120.png",  "idiom":"iphone", "scale":"2x", "size":"60x60"},
+              {"filename":"icon-180.png",  "idiom":"iphone", "scale":"3x", "size":"60x60"},
+              {"filename":"icon-1024.png", "idiom":"ios-marketing", "scale":"1x", "size":"1024x1024"}
+            ],
+            "info": {"author":"xcode","version":1}
+          }
+          APPICON_JSON
+          python3 - <<'ICON_PY'
+          import struct, zlib
+          from pathlib import Path
+
+          out = Path("GeneratedApp/Sources/Assets.xcassets/AppIcon.appiconset")
+          def chunk(kind, data):
+              return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+          def make_icon(size):
+              rows = bytearray()
+              for y in range(size):
+                  rows.append(0)
+                  for x in range(size):
+                      u, v = x / max(1, size - 1), y / max(1, size - 1)
+                      glow = max(0.0, 1.0 - ((u - .72) ** 2 + (v - .18) ** 2) ** .5 * 1.55)
+                      r = int(43 + 35 * u + 25 * glow)
+                      g = int(38 + 72 * v + 90 * glow)
+                      b = int(145 + 74 * u + 28 * glow)
+                      dx, dy = abs(x - size * .5), abs(y - size * .48)
+                      star = (dx / (size * .055) + dy / (size * .29) < 1) or (dx / (size * .29) + dy / (size * .055) < 1)
+                      dot1 = (x - size * .76) ** 2 + (y - size * .70) ** 2 < (size * .035) ** 2
+                      dot2 = (x - size * .25) ** 2 + (y - size * .25) ** 2 < (size * .022) ** 2
+                      if star or dot1 or dot2: r, g, b = 255, 255, 255
+                      rows.extend((r, g, b, 255))
+              ihdr = struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)
+              return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(bytes(rows), 9)) + chunk(b"IEND", b"")
+          for size in (40, 58, 60, 80, 87, 120, 180, 1024):
+              (out / f"icon-{size}.png").write_bytes(make_icon(size))
+          ICON_PY
 
       - name: Install XcodeGen
-        run: brew install xcodegen
-
-      - name: Generate Xcode project
-        run: xcodegen generate
-
-      # --- فحص البناء (من غير توقيع) ---
-      - name: Build (compile check)
+        shell: bash
         run: |
-          xcodebuild clean build \
-            -scheme AIHub \
-            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
-            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+          xcodebuild -version
 
-      # --- أرشفة + رفع TestFlight عند عمل Tag ---
-      - name: Archive & Upload to TestFlight
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Generate Xcode project and resolve packages
+        shell: bash
+        working-directory: GeneratedApp
+        run: |
+          set -euo pipefail
+          xcodegen generate
+          xcodebuild \
+            -resolvePackageDependencies \
+            -project AIHub.xcodeproj \
+            -scheme AIHub
+
+      - name: Build unsigned device IPA
+        shell: bash
+        working-directory: GeneratedApp
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project AIHub.xcodeproj \
+            -scheme AIHub \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath DerivedData-Unsigned \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            clean build
+
+          APP_PATH="DerivedData-Unsigned/Build/Products/Release-iphoneos/AIHub.app"
+          test -d "$APP_PATH"
+          rm -rf artifacts/Payload
+          mkdir -p artifacts/Payload
+          cp -R "$APP_PATH" artifacts/Payload/AIHub.app
+          (cd artifacts && zip -qry AIHub-unsigned.ipa Payload)
+          rm -rf artifacts/Payload
+
+      - name: Install optional signing certificate and profile
+        if: ${{ env.BUILD_CERTIFICATE_BASE64 != '' && env.BUILD_PROVISION_PROFILE_BASE64 != '' }}
+        shell: bash
         env:
           BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
           P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
           BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPSTORE_API_KEY_BASE64: ${{ secrets.APPSTORE_API_KEY_BASE64 }}
-          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
-          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
         run: |
-          set -e
-          CERT_PATH=$RUNNER_TEMP/build_certificate.p12
-          PP_PATH=$RUNNER_TEMP/profile.mobileprovision
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o "$CERT_PATH"
-          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode -o "$PP_PATH"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          set -euo pipefail
+          KEYCHAIN_PASS="${KEYCHAIN_PASSWORD:-aihub-temporary-keychain}"
+          CERT_PATH="$RUNNER_TEMP/build_certificate.p12"
+          PROFILE_PATH="$RUNNER_TEMP/build_profile.mobileprovision"
+          PROFILE_PLIST="$RUNNER_TEMP/build_profile.plist"
+          KEYCHAIN_PATH="$RUNNER_TEMP/aihub-signing.keychain-db"
+
+          printf '%s' "$BUILD_CERTIFICATE_BASE64" | base64 --decode > "$CERT_PATH"
+          printf '%s' "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
           security import "$CERT_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
           security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          mkdir -p ~/Library/MobileDevice/"Provisioning Profiles"
-          cp "$PP_PATH" ~/Library/MobileDevice/"Provisioning Profiles"
-          xcodegen generate
-          xcodebuild archive -scheme AIHub -configuration Release \
-            -archivePath "$RUNNER_TEMP/AIHub.xcarchive" \
+          security default-keychain -d user -s "$KEYCHAIN_PATH"
+
+          security cms -D -i "$PROFILE_PATH" > "$PROFILE_PLIST"
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$PROFILE_PLIST")
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$PROFILE_PLIST")
+          PROFILE_TEAM_ID=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$PROFILE_PLIST")
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          echo "PROFILE_TEAM_ID=$PROFILE_TEAM_ID" >> "$GITHUB_ENV"
+          echo "SIGNING_KEYCHAIN=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: Build optional signed development IPA
+        if: ${{ env.BUILD_CERTIFICATE_BASE64 != '' && env.BUILD_PROVISION_PROFILE_BASE64 != '' }}
+        shell: bash
+        working-directory: GeneratedApp
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          rm -rf AIHub.xcarchive ExportedIPA
+
+          xcodebuild archive \
+            -project AIHub.xcodeproj \
+            -scheme AIHub \
+            -configuration Release \
+            -sdk iphoneos \
             -destination 'generic/platform=iOS' \
-            CODE_SIGN_STYLE=manual DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            CODE_SIGN_IDENTITY="Apple Distribution"
-          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/AIHub.xcarchive" \
-            -exportPath "$RUNNER_TEMP/export" -exportOptionsPlist exportOptions.plist
-          echo -n "$APPSTORE_API_KEY_BASE64" | base64 --decode -o "$RUNNER_TEMP/AuthKey.p8"
-          mkdir -p "$RUNNER_TEMP/private_keys"
-          cp "$RUNNER_TEMP/AuthKey.p8" "$RUNNER_TEMP/private_keys/AuthKey_$APPSTORE_KEY_ID.p8"
-          cd "$RUNNER_TEMP/private_keys"
-          xcrun altool --upload-app -f "$RUNNER_TEMP/export/AIHub.ipa" \
-            --apiKey "$APPSTORE_KEY_ID" --apiIssuer "$APPSTORE_ISSUER_ID" --output-format normal
+            -archivePath AIHub.xcarchive \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="$PROFILE_TEAM_ID" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $SIGNING_KEYCHAIN"
+
+          cat > ExportOptions.plist <<EXPORT_PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>development</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>teamID</key><string>$PROFILE_TEAM_ID</string>
+            <key>provisioningProfiles</key>
+            <dict><key>$BUNDLE_ID</key><string>$PROFILE_NAME</string></dict>
+            <key>stripSwiftSymbols</key><true/>
+            <key>compileBitcode</key><false/>
+          </dict>
+          </plist>
+          EXPORT_PLIST
+
+          xcodebuild -exportArchive \
+            -archivePath AIHub.xcarchive \
+            -exportPath ExportedIPA \
+            -exportOptionsPlist ExportOptions.plist
+          cp ExportedIPA/*.ipa artifacts/AIHub-signed.ipa
+
+      - name: Write build information
+        shell: bash
+        working-directory: GeneratedApp
+        run: |
+          cat > artifacts/INSTALL.txt <<'TXT'
+          AI Hub iOS 16.4+
+
+          AIHub-unsigned.ipa must be signed with your own Apple ID/certificate before installation.
+          If AIHub-signed.ipa exists, it was signed with the development profile supplied in GitHub Secrets.
+          The target iPhone UDID must be included in that provisioning profile.
+
+          Open the app, go to Settings, add your own API keys, verify model IDs in each provider console,
+          then choose Auto Fallback or a specific provider. Keys are stored in iOS Keychain.
+          TXT
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AIHub-iOS-${{ github.run_number }}
+          path: GeneratedApp/artifacts/
+          if-no-files-found: error
+          retention-days: 14
