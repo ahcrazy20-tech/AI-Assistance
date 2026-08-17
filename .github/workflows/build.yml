@@ -28,15 +28,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select and verify Xcode 26
+      - name: Verify Xcode 26
         shell: bash
         run: |
           set -euo pipefail
-          XCODE_APP=$(find /Applications -maxdepth 1 -type d -name 'Xcode_26*.app' | sort | tail -n 1)
-          test -n "$XCODE_APP"
-          sudo xcode-select --switch "$XCODE_APP/Contents/Developer"
-          xcodebuild -version
-          xcodebuild -version | grep -Eq '^Xcode 26([. ]|$)'
+          XCODE_VERSION_OUTPUT="$(xcodebuild -version)"
+          printf '%s\n' "$XCODE_VERSION_OUTPUT"
+          XCODE_VERSION_LINE="${XCODE_VERSION_OUTPUT%%$'\n'*}"
+          case "$XCODE_VERSION_LINE" in
+            "Xcode 26"|"Xcode 26."*) ;;
+            *) echo "Expected Xcode 26 on the macos-26 runner, but found: $XCODE_VERSION_LINE" >&2; exit 1 ;;
+          esac
 
       - name: Generate app project
         shell: bash
@@ -2465,10 +2467,9 @@ jobs:
       - name: Write build information
         if: always()
         shell: bash
-        working-directory: GeneratedApp
         run: |
-          mkdir -p artifacts
-          cat > artifacts/INSTALL.txt <<'TXT'
+          mkdir -p GeneratedApp/artifacts
+          cat > GeneratedApp/artifacts/INSTALL.txt <<'TXT'
           AI Hub iOS 16.4+
 
           AIHub-unsigned.ipa must be signed before installation.
