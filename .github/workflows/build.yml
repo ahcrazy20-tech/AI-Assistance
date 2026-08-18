@@ -2070,13 +2070,15 @@ jobs:
           /2KXrXzrtqXJyriO956wPFnGmYisvWzI6qoA/Vsu4RAe+FidN+yI33DcUUOMAhcdTEfoG6BjT65X
           VB4lJ1Y2maOWzhM6Xf3/BhAQZM5Y4gcA
           SWIFT_SOURCE_GZIP_BASE64
-          if base64 --decode GeneratedApp/AIHubApp.swift.gz.b64 > GeneratedApp/AIHubApp.swift.gz 2>/dev/null; then
-            :
-          else
-            base64 -D GeneratedApp/AIHubApp.swift.gz.b64 > GeneratedApp/AIHubApp.swift.gz
-          fi
-          gzip -dc GeneratedApp/AIHubApp.swift.gz > GeneratedApp/Sources/AIHubApp.swift
-          rm -f GeneratedApp/AIHubApp.swift.gz.b64 GeneratedApp/AIHubApp.swift.gz
+          python3 - <<'PY_DECODE_SOURCE'
+          import base64
+          import gzip
+          from pathlib import Path
+          encoded = Path("GeneratedApp/AIHubApp.swift.gz.b64").read_text()
+          source = gzip.decompress(base64.b64decode(encoded))
+          Path("GeneratedApp/Sources/AIHubApp.swift").write_bytes(source)
+          PY_DECODE_SOURCE
+          rm -f GeneratedApp/AIHubApp.swift.gz.b64
 
           mkdir -p GeneratedApp/Sources/Assets.xcassets/AppIcon.appiconset
           cat > GeneratedApp/Sources/Assets.xcassets/Contents.json <<'ASSET_ROOT'
