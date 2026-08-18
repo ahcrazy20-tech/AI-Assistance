@@ -64,8 +64,8 @@ jobs:
             base:
               SWIFT_VERSION: 5.0
               IPHONEOS_DEPLOYMENT_TARGET: 16.4
-              CURRENT_PROJECT_VERSION: 7
-              MARKETING_VERSION: 1.5.0
+              CURRENT_PROJECT_VERSION: 8
+              MARKETING_VERSION: 1.6.0
               CODE_SIGN_STYLE: Automatic
           targets:
             AIHub:
@@ -85,6 +85,7 @@ jobs:
                   INFOPLIST_KEY_CFBundleDisplayName: AI Hub
                   INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
                   INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
+                  INFOPLIST_KEY_UIFileSharingEnabled: YES
                   INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
                   INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
                   INFOPLIST_KEY_UILaunchScreen_Generation: YES
@@ -207,6 +208,93 @@ jobs:
               }
           }
           
+          enum OutputMode: String, CaseIterable, Identifiable {
+              case answer, table, excel, csv, pdf, word
+              var id: String { rawValue }
+              var title: String {
+                  switch self {
+                  case .answer: return "Answer"
+                  case .table: return "Table"
+                  case .excel: return "Excel"
+                  case .csv: return "CSV"
+                  case .pdf: return "PDF"
+                  case .word: return "Word"
+                  }
+              }
+              var icon: String {
+                  switch self {
+                  case .answer: return "text.bubble"
+                  case .table: return "tablecells"
+                  case .excel: return "tablecells.badge.ellipsis"
+                  case .csv: return "text.append"
+                  case .pdf: return "doc.richtext"
+                  case .word: return "doc.text"
+                  }
+              }
+              var instruction: String {
+                  switch self {
+                  case .answer:
+                      return "Choose the clearest natural structure for the answer."
+                  case .table:
+                      return "Present the substantive result as a clean GitHub-Flavored Markdown table with concise column headers. Add prose only when essential."
+                  case .excel, .csv:
+                      return "The answer will be converted into a spreadsheet. Return one or more valid GitHub-Flavored Markdown tables with a header row and consistent column counts. Put a short heading immediately before each table; do not use fake columns or prose inside cells."
+                  case .pdf, .word:
+                      return "The answer will be exported as a polished document. Use a clear title, short sections, useful headings, lists, and tables where appropriate. Do not include internal notes about file generation."
+                  }
+              }
+              var automaticExport: ExportFormat? {
+                  switch self {
+                  case .excel: return .xlsx
+                  case .csv: return .csv
+                  case .pdf: return .pdf
+                  case .word: return .docx
+                  case .answer, .table: return nil
+                  }
+              }
+              static func resolved(selected: OutputMode, prompt: String) -> OutputMode {
+                  guard selected == .answer else { return selected }
+                  let value = prompt.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                  if value.contains("xlsx") || value.contains("excel") || value.contains("اكسل") || value.contains("إكسل") || value.contains("اكسيل") || value.contains("إكسيل") { return .excel }
+                  if value.contains("csv") { return .csv }
+                  if value.contains("pdf") || value.contains("بي دي اف") { return .pdf }
+                  if value.contains("docx") || value.contains("word") || value.contains("وورد") { return .word }
+                  if value.contains("جدول") || value.contains("table") { return .table }
+                  return .answer
+              }
+          }
+          
+          enum ExportFormat: String, CaseIterable, Identifiable {
+              case xlsx, csv, pdf, docx, txt, markdown
+              var id: String { rawValue }
+              var title: String {
+                  switch self {
+                  case .xlsx: return "Excel (.xlsx)"
+                  case .csv: return "CSV (.csv)"
+                  case .pdf: return "PDF (.pdf)"
+                  case .docx: return "Word (.docx)"
+                  case .txt: return "Text (.txt)"
+                  case .markdown: return "Markdown (.md)"
+                  }
+              }
+              var fileExtension: String { self == .markdown ? "md" : rawValue }
+              var icon: String {
+                  switch self {
+                  case .xlsx: return "tablecells"
+                  case .csv: return "text.append"
+                  case .pdf: return "doc.richtext"
+                  case .docx: return "doc.text"
+                  case .txt: return "doc.plaintext"
+                  case .markdown: return "text.document"
+                  }
+              }
+          }
+          
+          struct SharedFile: Identifiable {
+              let id = UUID()
+              let url: URL
+          }
+          
           enum SpeechLanguage: String, CaseIterable, Identifiable {
               case arabicSaudi = "ar-SA"
               case arabicEgypt = "ar-EG"
@@ -233,6 +321,8 @@ jobs:
               let text: String
               var provider: String? = nil
               var createdAt = Date()
+              var exportFileName: String? = nil
+              var exportFormat: String? = nil
           }
           
           struct InputAttachment: Identifiable {
@@ -427,6 +517,7 @@ jobs:
               @Published var responseStyle: ResponseStyle { didSet { defaults.set(responseStyle.rawValue, forKey: "responseStyle") } }
               @Published var intelligenceMode: IntelligenceMode { didSet { defaults.set(intelligenceMode.rawValue, forKey: "intelligenceMode") } }
               @Published var speechLanguage: SpeechLanguage { didSet { defaults.set(speechLanguage.rawValue, forKey: "speechLanguage") } }
+              @Published var outputMode: OutputMode { didSet { defaults.set(outputMode.rawValue, forKey: "outputMode") } }
               @Published var strictDocumentGrounding: Bool { didSet { defaults.set(strictDocumentGrounding, forKey: "strictDocumentGrounding") } }
               @Published var keepAttachment: Bool { didSet { defaults.set(keepAttachment, forKey: "keepAttachment") } }
           
@@ -463,6 +554,7 @@ jobs:
                   responseStyle = ResponseStyle(rawValue: store.string(forKey: "responseStyle") ?? "balanced") ?? .balanced
                   intelligenceMode = IntelligenceMode(rawValue: store.string(forKey: "intelligenceMode") ?? "smart") ?? .smart
                   speechLanguage = SpeechLanguage(rawValue: store.string(forKey: "speechLanguage") ?? "ar-SA") ?? .arabicSaudi
+                  outputMode = OutputMode(rawValue: store.string(forKey: "outputMode") ?? "answer") ?? .answer
                   strictDocumentGrounding = (store.object(forKey: "strictDocumentGrounding") as? Bool) ?? true
                   keepAttachment = (store.object(forKey: "keepAttachment") as? Bool) ?? true
           
@@ -616,12 +708,12 @@ jobs:
               private let nativeInlineLimit = 14 * 1024 * 1024
           
               @MainActor
-              func chat(history: [ChatMessage], prompt: String, attachment: InputAttachment?, selected: ProviderID, settings: AppSettings, allowedProviders: Set<ProviderID>) async throws -> ChatResult {
+              func chat(history: [ChatMessage], prompt: String, attachment: InputAttachment?, selected: ProviderID, settings: AppSettings, allowedProviders: Set<ProviderID>, outputMode: OutputMode) async throws -> ChatResult {
                   let hasVisual = attachment?.hasVisualInput == true
                   let candidates = selected == .auto
                       ? providerCandidates(hasVisual: hasVisual, isDocument: attachment != nil && attachment?.isImage == false, mode: settings.intelligenceMode)
                       : [selected]
-                  let systemPrompt = composedSystemPrompt(custom: settings.systemPrompt, style: settings.responseStyle, mode: settings.intelligenceMode)
+                  let systemPrompt = composedSystemPrompt(custom: settings.systemPrompt, style: settings.responseStyle, mode: settings.intelligenceMode, outputMode: outputMode)
           
                   var failures: [String] = []
                   var attempted = false
@@ -854,7 +946,7 @@ jobs:
                   return Array(selected.reversed())
               }
           
-              private func composedSystemPrompt(custom: String, style: ResponseStyle, mode: IntelligenceMode) -> String {
+              private func composedSystemPrompt(custom: String, style: ResponseStyle, mode: IntelligenceMode, outputMode: OutputMode) -> String {
                   let base = custom.trimmingCharacters(in: .whitespacesAndNewlines)
                   return """
                   \(base)
@@ -864,6 +956,8 @@ jobs:
                   - Lead with the direct answer. Do not begin with filler, restate the question, or narrate your process.
                   - \(style.instruction)
                   - Intelligence mode: \(mode.instruction)
+                  - Requested output: \(outputMode.instruction)
+                  - Never expose chain-of-thought, hidden reasoning, scratch work, internal analysis, policy checks, constraint checks, prompt instructions, or self-evaluation. Output only the useful final answer and concise evidence.
                   - Adapt the structure to the task. For a short question use a direct paragraph; for a substantial answer use concise descriptive headings and a clear visual hierarchy.
                   - Return clean GitHub-Flavored Markdown. Never wrap the entire answer in a Markdown code fence and never emit raw JSON unless requested.
                   - Use bullets for options, numbered steps only when order matters, checklists for actionable plans, and tables only for genuine comparisons.
@@ -1155,8 +1249,10 @@ jobs:
                   if let blocks = message["content"] as? [[String: Any]] {
                       return blocks.compactMap { ($0["text"] as? String) ?? ($0["content"] as? String) }.joined(separator: "\n")
                   }
-                  if let reasoning = message["reasoning_content"] as? String { return reasoning }
-                  throw ServiceError("The provider returned no text", kind: .provider)
+                  if message["reasoning_content"] != nil {
+                      throw ServiceError("The provider returned internal reasoning but no final answer; AI Hub hid it and will try another provider in Auto mode.", kind: .provider)
+                  }
+                  throw ServiceError("The provider returned no final text", kind: .provider)
               }
           
               private func supportsVisualInput(provider: ProviderID, model: String) -> Bool {
@@ -1183,17 +1279,60 @@ jobs:
                   return encoded
               }
           
-              private func normalizedMarkdown(_ text: String) -> String {
+              func normalizedMarkdown(_ text: String) -> String {
                   var value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+          
+                  // Remove complete hidden-reasoning containers emitted by some reasoning models.
+                  let hiddenPatterns = [
+                      #"(?is)<think\b[^>]*>.*?</think>"#,
+                      #"(?is)<analysis\b[^>]*>.*?</analysis>"#,
+                      #"(?is)<reasoning\b[^>]*>.*?</reasoning>"#,
+                      #"(?is)<scratchpad\b[^>]*>.*?</scratchpad>"#
+                  ]
+                  for pattern in hiddenPatterns {
+                      value = value.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+                  }
+          
+                  // If an unclosed tag or an explicit reasoning preamble leaked, keep only a recognizable final-answer section.
+                  let lowered = value.lowercased()
+                  let earlyPrefix = String(lowered.prefix(600))
+                  let hasReasoningPreamble = earlyPrefix.contains("<think>") || earlyPrefix.contains("<analysis>") || earlyPrefix.contains("<reasoning>") ||
+                      earlyPrefix.contains("here's a thinking process") || earlyPrefix.contains("here is a thinking process") ||
+                      earlyPrefix.contains("analyze user input") || earlyPrefix.contains("internal analysis")
+                  if hasReasoningPreamble {
+                      let finalMarkers = ["## final answer", "final answer:", "final response:", "## الإجابة النهائية", "الإجابة النهائية:", "## الجواب النهائي", "الجواب النهائي:"]
+                      if let match = finalMarkers.compactMap({ marker -> (String.Index, String)? in
+                          guard let range = value.range(of: marker, options: [.caseInsensitive, .diacriticInsensitive]) else { return nil }
+                          return (range.lowerBound, marker)
+                      }).sorted(by: { $0.0 < $1.0 }).first {
+                          value = String(value[match.0...])
+                      } else {
+                          return ""
+                      }
+                  }
+          
+                  value = value
+                      .replacingOccurrences(of: #"(?i)</?(think|analysis|reasoning|scratchpad)>"#, with: "", options: .regularExpression)
+                      .replacingOccurrences(of: #"(?im)^\s*(here'?s (a|the) thinking process|analyze user input|internal analysis|constraint check|check against constraints|matches non-negotiable contract|one refinement)\s*:.*$"#, with: "", options: .regularExpression)
+          
+                  // Remove a trailing provider self-audit block while preserving the actual answer above it.
+                  if let audit = value.range(
+                      of: #"(?im)^\s*(check against constraints|constraint check|internal self[- ]?check|self[- ]?evaluation)\s*:?.*$"#,
+                      options: .regularExpression
+                  ) {
+                      value = String(value[..<audit.lowerBound])
+                  }
+          
+                  value = value.trimmingCharacters(in: .whitespacesAndNewlines)
                   if value.hasPrefix("```markdown"), value.hasSuffix("```") {
                       value.removeFirst("```markdown".count)
                       value.removeLast(3)
-                      value = value.trimmingCharacters(in: .whitespacesAndNewlines)
                   } else if value.hasPrefix("```md"), value.hasSuffix("```") {
                       value.removeFirst("```md".count)
                       value.removeLast(3)
-                      value = value.trimmingCharacters(in: .whitespacesAndNewlines)
                   }
+                  value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                  value = value.replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
                   return value
               }
           
@@ -2270,6 +2409,523 @@ jobs:
               }
           }
           
+          // MARK: - Professional local exports
+          
+          struct ParsedMarkdownTable {
+              let title: String
+              let rows: [[String]]
+          }
+          
+          @MainActor enum ExportService {
+              private static let folderName = "AIHubExports"
+          
+              static var exportFolder: URL {
+                  let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                  return root.appendingPathComponent(folderName, isDirectory: true)
+              }
+          
+              static func existingURL(fileName: String) -> URL? {
+                  let safeName = (fileName as NSString).lastPathComponent
+                  guard safeName == fileName else { return nil }
+                  let url = exportFolder.appendingPathComponent(safeName)
+                  return FileManager.default.fileExists(atPath: url.path) ? url : nil
+              }
+          
+              static func create(text: String, format: ExportFormat, title: String) throws -> URL {
+                  try FileManager.default.createDirectory(at: exportFolder, withIntermediateDirectories: true)
+                  let base = safeFileBase(title)
+                  let url = uniqueURL(base: base, extension: format.fileExtension)
+                  switch format {
+                  case .markdown:
+                      guard let data = text.data(using: .utf8) else { throw ServiceError("Could not encode Markdown export.") }
+                      try data.write(to: url, options: .atomic)
+                  case .txt:
+                      guard let data = plainText(from: text).data(using: .utf8) else { throw ServiceError("Could not encode text export.") }
+                      try data.write(to: url, options: .atomic)
+                  case .csv:
+                      try makeCSV(from: text).write(to: url, options: .atomic)
+                  case .xlsx:
+                      try makeXLSX(from: text, title: title, at: url)
+                  case .pdf:
+                      try makePDF(from: text, title: title).write(to: url, options: .atomic)
+                  case .docx:
+                      try makeDOCX(from: text, title: title, at: url)
+                  }
+                  return url
+              }
+          
+              // MARK: Parsing
+          
+              static func markdownTables(from text: String) -> [ParsedMarkdownTable] {
+                  let lines = text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+                  var tables: [ParsedMarkdownTable] = []
+                  var lastHeading = ""
+                  var index = 0
+                  while index < lines.count {
+                      let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
+                      if trimmed.hasPrefix("#") {
+                          lastHeading = String(trimmed.drop(while: { $0 == "#" || $0 == " " })).trimmingCharacters(in: .whitespaces)
+                      }
+                      guard index + 1 < lines.count,
+                            isTableLine(lines[index]),
+                            isSeparatorRow(splitTableRow(lines[index + 1])) else {
+                          index += 1
+                          continue
+                      }
+                      var rows: [[String]] = [splitTableRow(lines[index])]
+                      index += 2
+                      while index < lines.count, isTableLine(lines[index]) {
+                          rows.append(splitTableRow(lines[index]))
+                          index += 1
+                      }
+                      let width = rows.map(\.count).max() ?? 0
+                      guard width > 0 else { continue }
+                      rows = rows.map { row in row + Array(repeating: "", count: max(0, width - row.count)) }
+                      let title = lastHeading.isEmpty ? "Table \(tables.count + 1)" : lastHeading
+                      tables.append(ParsedMarkdownTable(title: title, rows: rows))
+                  }
+                  return tables
+              }
+          
+              private static func isTableLine(_ line: String) -> Bool {
+                  let trimmed = line.trimmingCharacters(in: .whitespaces)
+                  return trimmed.contains("|") && !trimmed.isEmpty
+              }
+          
+              private static func splitTableRow(_ line: String) -> [String] {
+                  var value = line.trimmingCharacters(in: .whitespaces)
+                  if value.hasPrefix("|") { value.removeFirst() }
+                  if value.hasSuffix("|") { value.removeLast() }
+                  var result: [String] = []
+                  var current = ""
+                  var escaped = false
+                  for character in value {
+                      if escaped {
+                          current.append(character)
+                          escaped = false
+                      } else if character == "\\" {
+                          escaped = true
+                      } else if character == "|" {
+                          result.append(cleanMarkdownCell(current))
+                          current = ""
+                      } else { current.append(character) }
+                  }
+                  result.append(cleanMarkdownCell(current))
+                  return result
+              }
+          
+              private static func isSeparatorRow(_ cells: [String]) -> Bool {
+                  !cells.isEmpty && cells.allSatisfy { cell in
+                      let compact = cell.replacingOccurrences(of: " ", with: "")
+                      return compact.range(of: #"^:?-{3,}:?$"#, options: .regularExpression) != nil
+                  }
+              }
+          
+              private static func cleanMarkdownCell(_ value: String) -> String {
+                  value.trimmingCharacters(in: .whitespacesAndNewlines)
+                      .replacingOccurrences(of: "**", with: "")
+                      .replacingOccurrences(of: "`", with: "")
+                      .replacingOccurrences(of: "<br>", with: "\n", options: .caseInsensitive)
+              }
+          
+              private static func plainText(from markdown: String) -> String {
+                  markdown
+                      .replacingOccurrences(of: #"(?s)```(?:\w+)?\n(.*?)```"#, with: "$1", options: .regularExpression)
+                      .replacingOccurrences(of: #"(?m)^#{1,6}\s+"#, with: "", options: .regularExpression)
+                      .replacingOccurrences(of: "**", with: "")
+                      .replacingOccurrences(of: "`", with: "")
+              }
+          
+              // MARK: CSV
+          
+              private static func makeCSV(from text: String) throws -> Data {
+                  let tables = markdownTables(from: text)
+                  let rows: [[String]]
+                  if let first = tables.first { rows = first.rows }
+                  else {
+                      let content = plainText(from: text).split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+                      rows = [["Content"]] + content.map { [$0] }
+                  }
+                  let csv = "\u{FEFF}" + rows.map { $0.map(csvCell).joined(separator: ",") }.joined(separator: "\r\n")
+                  guard let data = csv.data(using: .utf8) else { throw ServiceError("Could not encode CSV export.", kind: .provider) }
+                  return data
+              }
+          
+              private static func csvCell(_ value: String) -> String {
+                  let escaped = value.replacingOccurrences(of: "\"", with: "\"\"")
+                  return "\"\(escaped)\""
+              }
+          
+              // MARK: XLSX
+          
+              private static func makeXLSX(from text: String, title: String, at url: URL) throws {
+                  var tables = markdownTables(from: text)
+                  if tables.isEmpty {
+                      let lines = plainText(from: text).split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+                      tables = [ParsedMarkdownTable(title: title.isEmpty ? "Content" : title, rows: [["Content"]] + lines.map { [$0] })]
+                  }
+                  let sheetNames = uniqueSheetNames(tables.map(\.title))
+                  var entries: [String: Data] = [:]
+                  entries["[Content_Types].xml"] = xmlData(contentTypesForXLSX(sheetCount: tables.count))
+                  entries["_rels/.rels"] = xmlData(packageRelationships(target: "xl/workbook.xml"))
+                  entries["docProps/core.xml"] = xmlData(coreProperties(title: title))
+                  entries["docProps/app.xml"] = xmlData(appProperties(application: "AI Hub"))
+                  entries["xl/workbook.xml"] = xmlData(workbookXML(sheetNames: sheetNames))
+                  entries["xl/_rels/workbook.xml.rels"] = xmlData(workbookRelationships(sheetCount: tables.count))
+                  entries["xl/styles.xml"] = xmlData(excelStylesXML())
+                  for (index, table) in tables.enumerated() {
+                      entries["xl/worksheets/sheet\(index + 1).xml"] = xmlData(worksheetXML(rows: table.rows))
+                  }
+                  try writeZip(entries: entries, to: url)
+              }
+          
+              private static func worksheetXML(rows: [[String]]) -> String {
+                  let columnCount = rows.map(\.count).max() ?? 1
+                  let widths = (0..<columnCount).map { column -> Double in
+                      let longest = rows.map { row in column < row.count ? row[column].count : 0 }.max() ?? 8
+                      return min(42, max(10, Double(longest) * 1.15 + 2))
+                  }
+                  let columns = widths.enumerated().map { index, width in
+                      "<col min=\"\(index + 1)\" max=\"\(index + 1)\" width=\"\(String(format: "%.1f", width))\" customWidth=\"1\"/>"
+                  }.joined()
+                  let rowXML = rows.enumerated().map { rowIndex, row in
+                      let cells = (0..<columnCount).map { column -> String in
+                          let value = column < row.count ? row[column] : ""
+                          return excelCell(value, reference: columnName(column + 1) + String(rowIndex + 1), header: rowIndex == 0)
+                      }.joined()
+                      return "<row r=\"\(rowIndex + 1)\"\(rowIndex == 0 ? " ht=\"25\" customHeight=\"1\"" : "")>\(cells)</row>"
+                  }.joined()
+                  let last = columnName(columnCount) + String(max(1, rows.count))
+                  return xmlHeader + """
+                  <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                    <sheetViews><sheetView workbookViewId="0" rightToLeft="1" showGridLines="1"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+                    <sheetFormatPr defaultRowHeight="20"/><cols>\(columns)</cols>
+                    <sheetData>\(rowXML)</sheetData>
+                    <autoFilter ref="A1:\(last)"/>
+                    <pageMargins left="0.35" right="0.35" top="0.6" bottom="0.6" header="0.2" footer="0.2"/>
+                  </worksheet>
+                  """
+              }
+          
+              private static func excelCell(_ value: String, reference: String, header: Bool) -> String {
+                  let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                  if !header, isSafeFormula(clean) {
+                      return "<c r=\"\(reference)\" s=\"2\"><f>\(xmlEscape(String(clean.dropFirst())))</f></c>"
+                  }
+                  if !header, clean.hasSuffix("%"), let number = Double(clean.dropLast().replacingOccurrences(of: ",", with: "")) {
+                      return "<c r=\"\(reference)\" s=\"4\"><v>\(number / 100)</v></c>"
+                  }
+                  let numberText = clean.replacingOccurrences(of: ",", with: "")
+                  if !header, let number = Double(numberText), !clean.hasPrefix("0") || clean == "0" || clean.hasPrefix("0.") {
+                      return "<c r=\"\(reference)\" s=\"3\"><v>\(number)</v></c>"
+                  }
+                  let style = header ? 1 : 2
+                  return "<c r=\"\(reference)\" s=\"\(style)\" t=\"inlineStr\"><is><t xml:space=\"preserve\">\(xmlEscape(clean))</t></is></c>"
+              }
+          
+              private static func isSafeFormula(_ value: String) -> Bool {
+                  value.range(of: #"^=(SUM|AVERAGE|MIN|MAX|COUNT|ROUND|IF)\("#, options: [.regularExpression, .caseInsensitive]) != nil
+              }
+          
+              private static func excelStylesXML() -> String {
+                  xmlHeader + """
+                  <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                    <numFmts count="1"><numFmt numFmtId="164" formatCode="0.00%"/></numFmts>
+                    <fonts count="2"><font><sz val="11"/><name val="Arial"/><family val="2"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Arial"/></font></fonts>
+                    <fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF4F46E5"/><bgColor indexed="64"/></patternFill></fill></fills>
+                    <borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFD1D5DB"/></left><right style="thin"><color rgb="FFD1D5DB"/></right><top style="thin"><color rgb="FFD1D5DB"/></top><bottom style="thin"><color rgb="FFD1D5DB"/></bottom><diagonal/></border></borders>
+                    <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+                    <cellXfs count="5">
+                      <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+                      <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1" readingOrder="2"/></xf>
+                      <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="right" vertical="top" wrapText="1" readingOrder="2"/></xf>
+                      <xf numFmtId="4" fontId="0" fillId="0" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="right" vertical="top" readingOrder="2"/></xf>
+                      <xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="right" vertical="top" readingOrder="2"/></xf>
+                    </cellXfs>
+                    <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+                  </styleSheet>
+                  """
+              }
+          
+              private static func workbookXML(sheetNames: [String]) -> String {
+                  let sheets = sheetNames.enumerated().map { "<sheet name=\"\(xmlEscape($0.element))\" sheetId=\"\($0.offset + 1)\" r:id=\"rId\($0.offset + 1)\"/>" }.joined()
+                  return xmlHeader + "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><bookViews><workbookView activeTab=\"0\"/></bookViews><sheets>\(sheets)</sheets></workbook>"
+              }
+          
+              private static func workbookRelationships(sheetCount: Int) -> String {
+                  let sheets = (1...sheetCount).map { "<Relationship Id=\"rId\($0)\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet\($0).xml\"/>" }.joined()
+                  return xmlHeader + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\(sheets)<Relationship Id=\"rId\(sheetCount + 1)\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/></Relationships>"
+              }
+          
+              private static func contentTypesForXLSX(sheetCount: Int) -> String {
+                  let sheets = (1...sheetCount).map { "<Override PartName=\"/xl/worksheets/sheet\($0).xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>" }.joined()
+                  return xmlHeader + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/><Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>\(sheets)<Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/><Override PartName=\"/docProps/app.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.extended-properties+xml\"/></Types>"
+              }
+          
+              private static func uniqueSheetNames(_ titles: [String]) -> [String] {
+                  var used: Set<String> = []
+                  return titles.enumerated().map { index, title in
+                      var base = title.replacingOccurrences(of: #"[\\/:?*\[\]]"#, with: " ", options: .regularExpression)
+                          .trimmingCharacters(in: .whitespacesAndNewlines)
+                      if base.isEmpty { base = "Table \(index + 1)" }
+                      base = String(base.prefix(31))
+                      var candidate = base
+                      var suffix = 2
+                      while used.contains(candidate.lowercased()) {
+                          let addition = " \(suffix)"
+                          candidate = String(base.prefix(max(1, 31 - addition.count))) + addition
+                          suffix += 1
+                      }
+                      used.insert(candidate.lowercased())
+                      return candidate
+                  }
+              }
+          
+              private static func columnName(_ number: Int) -> String {
+                  var value = max(1, number)
+                  var result = ""
+                  while value > 0 {
+                      value -= 1
+                      result = String(UnicodeScalar(65 + value % 26)!) + result
+                      value /= 26
+                  }
+                  return result
+              }
+          
+              // MARK: PDF
+          
+              private static func makePDF(from text: String, title: String) throws -> Data {
+                  let formatter = UIMarkupTextPrintFormatter(markupText: styledHTML(from: text, title: title))
+                  formatter.perPageContentInsets = UIEdgeInsets(top: 16, left: 0, bottom: 16, right: 0)
+                  let renderer = UIPrintPageRenderer()
+                  renderer.addPrintFormatter(formatter, startingAtPageAt: 0)
+                  let paper = CGRect(x: 0, y: 0, width: 595.2, height: 841.8)
+                  let printable = paper.insetBy(dx: 38, dy: 42)
+                  renderer.setValue(NSValue(cgRect: paper), forKey: "paperRect")
+                  renderer.setValue(NSValue(cgRect: printable), forKey: "printableRect")
+                  renderer.prepare(forDrawingPages: NSRange(location: 0, length: 1))
+                  let pages = max(1, renderer.numberOfPages)
+                  let data = NSMutableData()
+                  UIGraphicsBeginPDFContextToData(data, paper, [kCGPDFContextCreator as String: "AI Hub", kCGPDFContextTitle as String: title])
+                  for page in 0..<pages {
+                      UIGraphicsBeginPDFPage()
+                      renderer.drawPage(at: page, in: paper)
+                  }
+                  UIGraphicsEndPDFContext()
+                  guard data.length > 0 else { throw ServiceError("Could not render PDF export.", kind: .provider) }
+                  return data as Data
+              }
+          
+              private static func styledHTML(from markdown: String, title: String) -> String {
+                  let lines = markdown.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+                  var body = ""
+                  var index = 0
+                  var inCode = false
+                  var code = ""
+                  while index < lines.count {
+                      let line = lines[index]
+                      let trimmed = line.trimmingCharacters(in: .whitespaces)
+                      if trimmed.hasPrefix("```") {
+                          if inCode { body += "<pre dir=\"ltr\">\(htmlEscape(code))</pre>"; code = "" }
+                          inCode.toggle(); index += 1; continue
+                      }
+                      if inCode { code += line + "\n"; index += 1; continue }
+                      if index + 1 < lines.count, isTableLine(line), isSeparatorRow(splitTableRow(lines[index + 1])) {
+                          var rows = [splitTableRow(line)]; index += 2
+                          while index < lines.count, isTableLine(lines[index]) { rows.append(splitTableRow(lines[index])); index += 1 }
+                          body += htmlTable(rows)
+                          continue
+                      }
+                      if trimmed.isEmpty { body += "<div class=\"space\"></div>" }
+                      else if trimmed.hasPrefix("### ") { body += "<h3>\(inlineHTML(String(trimmed.dropFirst(4))))</h3>" }
+                      else if trimmed.hasPrefix("## ") { body += "<h2>\(inlineHTML(String(trimmed.dropFirst(3))))</h2>" }
+                      else if trimmed.hasPrefix("# ") { body += "<h1>\(inlineHTML(String(trimmed.dropFirst(2))))</h1>" }
+                      else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") { body += "<div class=\"bullet\">• \(inlineHTML(String(trimmed.dropFirst(2))))</div>" }
+                      else if trimmed.range(of: #"^\d+[.)]\s+"#, options: .regularExpression) != nil { body += "<div class=\"bullet\">\(inlineHTML(trimmed))</div>" }
+                      else if trimmed.hasPrefix(">") { body += "<blockquote>\(inlineHTML(String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)))</blockquote>" }
+                      else { body += "<p>\(inlineHTML(trimmed))</p>" }
+                      index += 1
+                  }
+                  if inCode { body += "<pre dir=\"ltr\">\(htmlEscape(code))</pre>" }
+                  return """
+                  <!doctype html><html><head><meta charset="utf-8"><style>
+                  @page { size: A4; margin: 0; } body { font-family: -apple-system, Arial, sans-serif; font-size: 12.5pt; line-height: 1.55; color: #171717; direction: auto; }
+                  h1 { font-size: 24pt; color: #312e81; margin: 0 0 16px; } h2 { font-size: 17pt; color: #3730a3; border-bottom: 1px solid #ddd; padding-bottom: 5px; margin-top: 20px; } h3 { font-size: 14pt; color: #4338ca; margin-top: 15px; }
+                  p { margin: 6px 0; } .bullet { margin: 4px 14px; } .space { height: 7px; } blockquote { border-inline-start: 4px solid #6366f1; padding: 8px 12px; color: #444; background: #f5f3ff; }
+                  table { width: 100%; border-collapse: collapse; margin: 12px 0 18px; font-size: 10.5pt; } th { background: #4f46e5; color: white; font-weight: bold; } th, td { border: 1px solid #c7c7d1; padding: 7px; text-align: start; vertical-align: top; } tr:nth-child(even) td { background: #f8fafc; }
+                  pre { background: #111827; color: #f9fafb; padding: 10px; border-radius: 6px; white-space: pre-wrap; font-family: Menlo, monospace; font-size: 9pt; }
+                  .meta { color: #666; font-size: 9pt; margin-bottom: 12px; }
+                  </style></head><body dir="auto"><h1>\(htmlEscape(title.isEmpty ? "AI Hub Export" : title))</h1><div class="meta">Generated by AI Hub</div>\(body)</body></html>
+                  """
+              }
+          
+              private static func htmlTable(_ rows: [[String]]) -> String {
+                  guard let header = rows.first else { return "" }
+                  let head = "<tr>" + header.map { "<th>\(inlineHTML($0))</th>" }.joined() + "</tr>"
+                  let body = rows.dropFirst().map { row in "<tr>" + row.map { "<td>\(inlineHTML($0))</td>" }.joined() + "</tr>" }.joined()
+                  return "<table>\(head)\(body)</table>"
+              }
+          
+              private static func inlineHTML(_ value: String) -> String {
+                  var result = htmlEscape(value)
+                  result = result.replacingOccurrences(of: #"\*\*(.+?)\*\*"#, with: "<strong>$1</strong>", options: .regularExpression)
+                  result = result.replacingOccurrences(of: #"`(.+?)`"#, with: "<code>$1</code>", options: .regularExpression)
+                  return result
+              }
+          
+              // MARK: DOCX
+          
+              private static func makeDOCX(from text: String, title: String, at url: URL) throws {
+                  let entries: [String: Data] = [
+                      "[Content_Types].xml": xmlData(docxContentTypes()),
+                      "_rels/.rels": xmlData(packageRelationships(target: "word/document.xml")),
+                      "docProps/core.xml": xmlData(coreProperties(title: title)),
+                      "docProps/app.xml": xmlData(appProperties(application: "AI Hub")),
+                      "word/document.xml": xmlData(docxDocument(markdown: text, title: title)),
+                      "word/styles.xml": xmlData(docxStyles()),
+                      "word/settings.xml": xmlData(xmlHeader + "<w:settings xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:themeFontLang w:val=\"en-US\" w:bidi=\"ar-SA\"/></w:settings>"),
+                      "word/_rels/document.xml.rels": xmlData(xmlHeader + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings\" Target=\"settings.xml\"/></Relationships>")
+                  ]
+                  try writeZip(entries: entries, to: url)
+              }
+          
+              private static func docxDocument(markdown: String, title: String) -> String {
+                  let lines = markdown.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+                  var body = docxParagraph(title.isEmpty ? "AI Hub Export" : title, style: "Title")
+                  var index = 0
+                  var inCode = false
+                  var code = ""
+                  while index < lines.count {
+                      let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
+                      if trimmed.hasPrefix("```") {
+                          if inCode { body += docxParagraph(code, style: "Code"); code = "" }
+                          inCode.toggle(); index += 1; continue
+                      }
+                      if inCode { code += lines[index] + "\n"; index += 1; continue }
+                      if index + 1 < lines.count, isTableLine(lines[index]), isSeparatorRow(splitTableRow(lines[index + 1])) {
+                          var rows = [splitTableRow(lines[index])]; index += 2
+                          while index < lines.count, isTableLine(lines[index]) { rows.append(splitTableRow(lines[index])); index += 1 }
+                          body += docxTable(rows)
+                          continue
+                      }
+                      if trimmed.hasPrefix("### ") { body += docxParagraph(String(trimmed.dropFirst(4)), style: "Heading3") }
+                      else if trimmed.hasPrefix("## ") { body += docxParagraph(String(trimmed.dropFirst(3)), style: "Heading2") }
+                      else if trimmed.hasPrefix("# ") { body += docxParagraph(String(trimmed.dropFirst(2)), style: "Heading1") }
+                      else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") { body += docxParagraph("• " + String(trimmed.dropFirst(2)), style: "ListParagraph") }
+                      else { body += docxParagraph(trimmed, style: "Normal") }
+                      index += 1
+                  }
+                  if inCode { body += docxParagraph(code, style: "Code") }
+                  return xmlHeader + "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>\(body)<w:sectPr><w:bidi/><w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1134\" w:right=\"1134\" w:bottom=\"1134\" w:left=\"1134\" w:header=\"500\" w:footer=\"500\" w:gutter=\"0\"/></w:sectPr></w:body></w:document>"
+              }
+          
+              private static func docxParagraph(_ text: String, style: String) -> String {
+                  let rtl = containsArabic(text)
+                  let paragraph = rtl ? "<w:bidi/><w:jc w:val=\"right\"/>" : "<w:jc w:val=\"left\"/>"
+                  let run = rtl ? "<w:rtl/><w:rFonts w:ascii=\"Arial\" w:hAnsi=\"Arial\" w:cs=\"Arial\"/>" : "<w:rFonts w:ascii=\"Arial\" w:hAnsi=\"Arial\"/>"
+                  return "<w:p><w:pPr><w:pStyle w:val=\"\(style)\"/>\(paragraph)</w:pPr><w:r><w:rPr>\(run)</w:rPr><w:t xml:space=\"preserve\">\(xmlEscape(text))</w:t></w:r></w:p>"
+              }
+          
+              private static func docxTable(_ rows: [[String]]) -> String {
+                  let tableRows = rows.enumerated().map { rowIndex, row in
+                      let cells = row.map { value in
+                          let rtl = containsArabic(value)
+                          let shading = rowIndex == 0 ? "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"4F46E5\"/>" : ""
+                          let color = rowIndex == 0 ? "<w:color w:val=\"FFFFFF\"/><w:b/>" : ""
+                          return "<w:tc><w:tcPr><w:tcW w:w=\"2400\" w:type=\"dxa\"/>\(shading)</w:tcPr><w:p><w:pPr>\(rtl ? "<w:bidi/><w:jc w:val=\"right\"/>" : "")</w:pPr><w:r><w:rPr>\(color)\(rtl ? "<w:rtl/>" : "")</w:rPr><w:t xml:space=\"preserve\">\(xmlEscape(value))</w:t></w:r></w:p></w:tc>"
+                      }.joined()
+                      return "<w:tr>\(cells)</w:tr>"
+                  }.joined()
+                  return "<w:tbl><w:tblPr><w:tblStyle w:val=\"TableGrid\"/><w:tblW w:w=\"0\" w:type=\"auto\"/><w:bidiVisual/></w:tblPr>\(tableRows)</w:tbl>"
+              }
+          
+              private static func docxStyles() -> String {
+                  xmlHeader + """
+                  <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                    <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:style>
+                    <w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:rPr><w:b/><w:color w:val="312E81"/><w:sz w:val="36"/><w:szCs w:val="36"/></w:rPr></w:style>
+                    <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:rPr><w:b/><w:color w:val="3730A3"/><w:sz w:val="30"/><w:szCs w:val="30"/></w:rPr></w:style>
+                    <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:rPr><w:b/><w:color w:val="4338CA"/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr></w:style>
+                    <w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:basedOn w:val="Normal"/><w:rPr><w:b/><w:color w:val="4F46E5"/><w:sz w:val="23"/><w:szCs w:val="23"/></w:rPr></w:style>
+                    <w:style w:type="paragraph" w:styleId="ListParagraph"><w:name w:val="List Paragraph"/><w:basedOn w:val="Normal"/><w:pPr><w:ind w:left="360" w:right="360"/></w:pPr></w:style>
+                    <w:style w:type="paragraph" w:styleId="Code"><w:name w:val="Code"/><w:basedOn w:val="Normal"/><w:rPr><w:rFonts w:ascii="Menlo" w:hAnsi="Menlo"/><w:sz w:val="18"/></w:rPr></w:style>
+                    <w:style w:type="table" w:styleId="TableGrid"><w:name w:val="Table Grid"/><w:tblPr><w:tblBorders><w:top w:val="single" w:sz="4" w:color="BFC3CC"/><w:left w:val="single" w:sz="4" w:color="BFC3CC"/><w:bottom w:val="single" w:sz="4" w:color="BFC3CC"/><w:right w:val="single" w:sz="4" w:color="BFC3CC"/><w:insideH w:val="single" w:sz="4" w:color="D1D5DB"/><w:insideV w:val="single" w:sz="4" w:color="D1D5DB"/></w:tblBorders></w:tblPr></w:style>
+                  </w:styles>
+                  """
+              }
+          
+              private static func docxContentTypes() -> String {
+                  xmlHeader + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/><Override PartName=\"/word/settings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml\"/><Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/><Override PartName=\"/docProps/app.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.extended-properties+xml\"/></Types>"
+              }
+          
+              // MARK: OOXML and file helpers
+          
+              private static let xmlHeader = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+          
+              private static func packageRelationships(target: String) -> String {
+                  xmlHeader + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"\(target)\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/><Relationship Id=\"rId3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties\" Target=\"docProps/app.xml\"/></Relationships>"
+              }
+          
+              private static func coreProperties(title: String) -> String {
+                  let timestamp = ISO8601DateFormatter().string(from: Date())
+                  return xmlHeader + "<cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:dcterms=\"http://purl.org/dc/terms/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><dc:title>\(xmlEscape(title))</dc:title><dc:creator>AI Hub</dc:creator><cp:lastModifiedBy>AI Hub</cp:lastModifiedBy><dcterms:created xsi:type=\"dcterms:W3CDTF\">\(timestamp)</dcterms:created><dcterms:modified xsi:type=\"dcterms:W3CDTF\">\(timestamp)</dcterms:modified></cp:coreProperties>"
+              }
+          
+              private static func appProperties(application: String) -> String {
+                  xmlHeader + "<Properties xmlns=\"http://schemas.openxmlformats.org/officeDocument/2006/extended-properties\" xmlns:vt=\"http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes\"><Application>\(xmlEscape(application))</Application><AppVersion>1.0</AppVersion></Properties>"
+              }
+          
+              private static func writeZip(entries: [String: Data], to url: URL) throws {
+                  try? FileManager.default.removeItem(at: url)
+                  guard let archive = Archive(url: url, accessMode: .create) else {
+                      throw ServiceError("Could not create Office archive.", kind: .provider)
+                  }
+                  for path in entries.keys.sorted() {
+                      guard let data = entries[path] else { continue }
+                      try archive.addEntry(with: path, type: .file, uncompressedSize: Int64(data.count), compressionMethod: .deflate) { position, size in
+                          let start = Int(position)
+                          guard start < data.count else { return Data() }
+                          return data.subdata(in: start..<min(data.count, start + size))
+                      }
+                  }
+              }
+          
+              private static func xmlData(_ value: String) -> Data { Data(value.utf8) }
+          
+              private static func xmlEscape(_ value: String) -> String {
+                  value.replacingOccurrences(of: "&", with: "&amp;")
+                      .replacingOccurrences(of: "<", with: "&lt;")
+                      .replacingOccurrences(of: ">", with: "&gt;")
+                      .replacingOccurrences(of: "\"", with: "&quot;")
+                      .replacingOccurrences(of: "'", with: "&apos;")
+              }
+          
+              private static func htmlEscape(_ value: String) -> String { xmlEscape(value) }
+          
+              private static func containsArabic(_ value: String) -> Bool {
+                  value.unicodeScalars.contains { scalar in
+                      (0x0600...0x06FF).contains(scalar.value) || (0x0750...0x077F).contains(scalar.value) ||
+                      (0x08A0...0x08FF).contains(scalar.value) || (0xFB50...0xFEFF).contains(scalar.value)
+                  }
+              }
+          
+              private static func safeFileBase(_ title: String) -> String {
+                  var value = title.replacingOccurrences(of: #"[\\/:*?\"<>|\n\r]"#, with: " ", options: .regularExpression)
+                      .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                      .trimmingCharacters(in: .whitespacesAndNewlines)
+                  if value.isEmpty { value = "AI Hub Export" }
+                  return String(value.prefix(48))
+              }
+          
+              private static func uniqueURL(base: String, extension ext: String) -> URL {
+                  let formatter = DateFormatter()
+                  formatter.locale = Locale(identifier: "en_US_POSIX")
+                  formatter.dateFormat = "yyyyMMdd-HHmmss"
+                  let suffix = String(UUID().uuidString.prefix(4))
+                  return exportFolder.appendingPathComponent("\(base)-\(formatter.string(from: Date()))-\(suffix).\(ext)")
+              }
+          }
+          
           // MARK: - Voice input and spoken answers
           
           @MainActor final class VoiceInputController: NSObject, ObservableObject {
@@ -2470,6 +3126,7 @@ jobs:
               @State private var photoItem: PhotosPickerItem?
               @State private var showFileImporter = false
               @State private var showScanner = false
+              @State private var pendingSharedFile: SharedFile?
               @State private var errorMessage = ""
               @State private var showError = false
               @FocusState private var composerFocused: Bool
@@ -2665,32 +3322,46 @@ jobs:
                                   .opacity(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.45 : 1)
                               }
           
-                              HStack {
-                                  Menu {
-                                      ForEach(ProviderID.allCases) { provider in
-                                          Button { settings.selectedProvider = provider; composerFocused = false } label: {
-                                              if provider == settings.selectedProvider { Label(provider.title, systemImage: "checkmark") }
-                                              else { Text(provider.title) }
+                              ScrollView(.horizontal, showsIndicators: false) {
+                                  HStack(spacing: 14) {
+                                      Menu {
+                                          ForEach(ProviderID.allCases) { provider in
+                                              Button { settings.selectedProvider = provider; composerFocused = false } label: {
+                                                  if provider == settings.selectedProvider { Label(provider.title, systemImage: "checkmark") }
+                                                  else { Text(provider.title) }
+                                              }
                                           }
-                                      }
-                                  } label: { Label(settings.selectedProvider.shortTitle, systemImage: "cpu").font(.caption.bold()) }
-                                  Menu {
-                                      ForEach(IntelligenceMode.allCases) { mode in
-                                          Button { settings.intelligenceMode = mode; composerFocused = false } label: {
-                                              if mode == settings.intelligenceMode { Label(mode.title, systemImage: "checkmark") }
-                                              else { Label(mode.title, systemImage: mode.icon) }
+                                      } label: { Label(settings.selectedProvider.shortTitle, systemImage: "cpu").font(.caption.bold()) }
+          
+                                      Menu {
+                                          ForEach(IntelligenceMode.allCases) { mode in
+                                              Button { settings.intelligenceMode = mode; composerFocused = false } label: {
+                                                  if mode == settings.intelligenceMode { Label(mode.title, systemImage: "checkmark") }
+                                                  else { Label(mode.title, systemImage: mode.icon) }
+                                              }
                                           }
+                                      } label: { Label(settings.intelligenceMode.title, systemImage: settings.intelligenceMode.icon).font(.caption.bold()) }
+          
+                                      Menu {
+                                          ForEach(OutputMode.allCases) { mode in
+                                              Button { settings.outputMode = mode; composerFocused = false } label: {
+                                                  if mode == settings.outputMode { Label(mode.title, systemImage: "checkmark") }
+                                                  else { Label(mode.title, systemImage: mode.icon) }
+                                              }
+                                          }
+                                      } label: {
+                                          Label(settings.outputMode.title, systemImage: settings.outputMode.icon)
+                                              .font(.caption.bold())
+                                              .foregroundStyle(settings.outputMode == .answer ? Color.secondary : Color.indigo)
                                       }
-                                  } label: {
-                                      Label(settings.intelligenceMode.title, systemImage: settings.intelligenceMode.icon).font(.caption.bold())
+          
+                                      if attachment.current != nil {
+                                          Label(settings.strictDocumentGrounding ? "Source only" : (settings.keepAttachment ? "Attachment stays" : "One message"),
+                                                systemImage: settings.strictDocumentGrounding ? "checkmark.shield.fill" : (settings.keepAttachment ? "pin.fill" : "1.circle"))
+                                              .font(.caption2).foregroundStyle(settings.strictDocumentGrounding ? Color.green : Color.secondary)
+                                      }
+                                      Button { composerFocused = false } label: { Label("Keyboard", systemImage: "keyboard.chevron.compact.down") }.font(.caption2)
                                   }
-                                  Spacer()
-                                  if attachment.current != nil {
-                                      Label(settings.strictDocumentGrounding ? "Source only" : (settings.keepAttachment ? "Attachment stays" : "One message"),
-                                            systemImage: settings.strictDocumentGrounding ? "checkmark.shield.fill" : (settings.keepAttachment ? "pin.fill" : "1.circle"))
-                                          .font(.caption2).foregroundStyle(settings.strictDocumentGrounding ? Color.green : Color.secondary)
-                                  }
-                                  Button("Hide keyboard") { composerFocused = false }.font(.caption2)
                               }
                               ProviderUsageStrip()
                           }
@@ -2726,6 +3397,7 @@ jobs:
                           onError: { error in showScanner = false; present("Could not scan document: \(error.localizedDescription)") }
                       ).ignoresSafeArea()
                   }
+                  .sheet(item: $pendingSharedFile) { item in ShareSheet(items: [item.url]) }
                   .alert("Error", isPresented: $showError) { Button("OK", role: .cancel) {} } message: { Text(errorMessage) }
               }
           
@@ -2767,18 +3439,43 @@ jobs:
           
                   let history = chat.messages
                   let currentAttachment = attachment.current
+                  let requestedOutput = OutputMode.resolved(selected: settings.outputMode, prompt: prompt)
                   input = ""
-                  chat.messages.append(ChatMessage(role: .user, text: currentAttachment == nil ? prompt : "\(prompt)\n\n📎 \(currentAttachment!.name)"))
+                  let userText = currentAttachment == nil ? prompt : "\(prompt)\n\n📎 \(currentAttachment!.name)"
+                  chat.messages.append(ChatMessage(role: .user, text: requestedOutput == .answer ? userText : userText + "\n\n📤 \(requestedOutput.title)"))
                   chat.isSending = true
                   Task {
                       defer { chat.isSending = false }
                       do {
-                          let result = try await AIService.shared.chat(history: history, prompt: prompt, attachment: currentAttachment, selected: settings.selectedProvider, settings: settings, allowedProviders: allowed)
+                          let result = try await AIService.shared.chat(
+                              history: history,
+                              prompt: prompt,
+                              attachment: currentAttachment,
+                              selected: settings.selectedProvider,
+                              settings: settings,
+                              allowedProviders: allowed,
+                              outputMode: requestedOutput
+                          )
                           let providerLabel = result.reviewer.map { "\(result.provider.shortTitle) • checked by \($0.shortTitle)" } ?? result.provider.shortTitle
-                          chat.messages.append(ChatMessage(role: .assistant, text: result.text, provider: providerLabel))
+                          var fileName: String?
+                          var fileFormat: String?
+                          var generatedURL: URL?
+                          var exportFailure: String?
+                          if let format = requestedOutput.automaticExport {
+                              do {
+                                  let title = String(prompt.replacingOccurrences(of: "\n", with: " ").prefix(48))
+                                  let url = try ExportService.create(text: result.text, format: format, title: title)
+                                  fileName = url.lastPathComponent
+                                  fileFormat = format.rawValue
+                                  generatedURL = url
+                              } catch { exportFailure = error.localizedDescription }
+                          }
+                          chat.messages.append(ChatMessage(role: .assistant, text: result.text, provider: providerLabel, exportFileName: fileName, exportFormat: fileFormat))
                           usage.record(result.provider)
                           if let reviewer = result.reviewer { usage.record(reviewer) }
                           if !settings.keepAttachment { attachment.current = nil }
+                          if let generatedURL { pendingSharedFile = SharedFile(url: generatedURL) }
+                          if let exportFailure { present("The answer was created, but file export failed: \(exportFailure)") }
                       } catch { present(error.localizedDescription) }
                   }
               }
@@ -2832,6 +3529,9 @@ jobs:
               let message: ChatMessage
               @State private var copied = false
               @State private var showShare = false
+              @State private var shareFileURL: URL?
+              @State private var exportError = ""
+              @State private var showExportError = false
           
               var body: some View {
                   Group {
@@ -2841,9 +3541,13 @@ jobs:
                   .padding(.horizontal, 12)
                   .contextMenu {
                       Button { copyMessage() } label: { Label("Copy", systemImage: "doc.on.doc") }
-                      Button { showShare = true } label: { Label("Share", systemImage: "square.and.arrow.up") }
+                      Button { shareFileURL = nil; showShare = true } label: { Label("Share", systemImage: "square.and.arrow.up") }
                   }
-                  .sheet(isPresented: $showShare) { ShareSheet(items: [message.text]) }
+                  .sheet(isPresented: $showShare) {
+                      if let shareFileURL { ShareSheet(items: [shareFileURL]) }
+                      else { ShareSheet(items: [displayText]) }
+                  }
+                  .alert("Export Error", isPresented: $showExportError) { Button("OK", role: .cancel) {} } message: { Text(exportError) }
               }
           
               private var assistantCard: some View {
@@ -2874,7 +3578,7 @@ jobs:
           
                       Divider().opacity(0.55)
           
-                      Markdown(message.text)
+                      Markdown(displayText)
                           .markdownTheme(.gitHub)
                           .textSelection(.enabled)
                           .multilineTextAlignment(isRightToLeft ? .trailing : .leading)
@@ -2882,18 +3586,37 @@ jobs:
                           .frame(maxWidth: .infinity, alignment: isRightToLeft ? .trailing : .leading)
                           .padding(14)
           
+                      if let fileURL = generatedFileURL {
+                          Divider().opacity(0.55)
+                          HStack(spacing: 10) {
+                              Image(systemName: exportIcon).foregroundStyle(.indigo)
+                              VStack(alignment: .leading, spacing: 2) {
+                                  Text("Generated file").font(.caption.bold())
+                                  Text(fileURL.lastPathComponent).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                              }
+                              Spacer()
+                              Button { shareFileURL = fileURL; showShare = true } label: { Label("Open", systemImage: "square.and.arrow.up") }
+                                  .buttonStyle(.bordered).controlSize(.small)
+                          }
+                          .padding(.horizontal, 14).padding(.vertical, 10)
+                      }
+          
                       Divider().opacity(0.55)
           
-                      HStack(spacing: 18) {
+                      HStack(spacing: 15) {
                           Button { copyMessage() } label: {
                               Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
                           }
-                          Button { showShare = true } label: { Label("Share", systemImage: "square.and.arrow.up") }
-                          Button { SpeechPlayback.shared.toggle(text: message.text, language: isRightToLeft ? "ar-SA" : "en-US") } label: {
+                          Button { shareFileURL = nil; showShare = true } label: { Label("Share", systemImage: "square.and.arrow.up") }
+                          Button { SpeechPlayback.shared.toggle(text: displayText, language: isRightToLeft ? "ar-SA" : "en-US") } label: {
                               Label("Listen", systemImage: "speaker.wave.2.fill")
                           }
+                          Menu {
+                              ForEach(ExportFormat.allCases) { format in
+                                  Button { export(format) } label: { Label(format.title, systemImage: format.icon) }
+                              }
+                          } label: { Label("Export", systemImage: "square.and.arrow.down") }
                           Spacer()
-                          Image(systemName: "text.alignleft").foregroundStyle(.secondary)
                       }
                       .font(.caption)
                       .buttonStyle(.plain)
@@ -2910,7 +3633,7 @@ jobs:
                   HStack(alignment: .bottom) {
                       Spacer(minLength: 42)
                       VStack(alignment: .trailing, spacing: 6) {
-                          Text(message.text)
+                          Text(displayText)
                               .textSelection(.enabled)
                               .multilineTextAlignment(isRightToLeft ? .trailing : .leading)
                               .frame(maxWidth: .infinity, alignment: isRightToLeft ? .trailing : .leading)
@@ -2927,8 +3650,36 @@ jobs:
                   }
               }
           
+              private var displayText: String {
+                  guard message.role == .assistant else { return message.text }
+                  let cleaned = AIService.shared.normalizedMarkdown(message.text)
+                  return cleaned.isEmpty ? "تم إخفاء مخرجات التفكير الداخلي لأنها لم تتضمن إجابة نهائية صالحة." : cleaned
+              }
+          
+              private var generatedFileURL: URL? {
+                  guard let name = message.exportFileName else { return nil }
+                  return ExportService.existingURL(fileName: name)
+              }
+          
+              private var exportIcon: String {
+                  guard let value = message.exportFormat, let format = ExportFormat(rawValue: value) else { return "doc.fill" }
+                  return format.icon
+              }
+          
+              private func export(_ format: ExportFormat) {
+                  do {
+                      let url = try ExportService.create(text: displayText, format: format, title: "AI Hub Response")
+                      shareFileURL = url
+                      showShare = true
+                      UINotificationFeedbackGenerator().notificationOccurred(.success)
+                  } catch {
+                      exportError = error.localizedDescription
+                      showExportError = true
+                  }
+              }
+          
               private var isRightToLeft: Bool {
-                  message.text.unicodeScalars.contains { scalar in
+                  displayText.unicodeScalars.contains { scalar in
                       (0x0600...0x06FF).contains(scalar.value) ||
                       (0x0750...0x077F).contains(scalar.value) ||
                       (0x08A0...0x08FF).contains(scalar.value)
@@ -2936,7 +3687,7 @@ jobs:
               }
           
               private func copyMessage() {
-                  UIPasteboard.general.string = message.text
+                  UIPasteboard.general.string = displayText
                   copied = true
                   UINotificationFeedbackGenerator().notificationOccurred(.success)
                   DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
@@ -3474,6 +4225,9 @@ jobs:
                           }
           
                           Section("Assistant") {
+                              Picker("Default output", selection: $settings.outputMode) {
+                                  ForEach(OutputMode.allCases) { mode in Label(mode.title, systemImage: mode.icon).tag(mode) }
+                              }
                               Picker("Voice input language", selection: $settings.speechLanguage) {
                                   ForEach(SpeechLanguage.allCases) { language in Text(language.title).tag(language) }
                               }
@@ -3787,6 +4541,11 @@ jobs:
           - Cloudflare and Z.AI can receive multiple compact PDF page images; Gemini/OpenRouter retain native PDF paths.
           - Voice input uses Apple Speech Recognition with selectable Arabic/English locale, plus a spoken-answer button using AVSpeechSynthesizer.
           - Microphone and Speech Recognition permissions are requested only when voice input is first used.
+          - Hidden chain-of-thought, <think> blocks, reasoning_content, internal constraint checks, and provider self-audits are removed or rejected before display.
+          - Output can be selected before sending: Answer, Markdown Table, Excel, CSV, PDF, or Word; prompt keywords can also infer the requested type.
+          - Every assistant answer has an Export menu for XLSX, CSV, PDF, DOCX, TXT, and Markdown.
+          - Professional XLSX exports support multiple sheets, Arabic RTL, styled headers, frozen first row, filters, numeric/percent cells, safe formulas, and useful widths.
+          - PDF and DOCX exports preserve Arabic direction, headings, lists, code, and tables; generated files persist under Documents/AIHubExports and can be shared.
           - Maximum imported file size: 50 MB.
           TXT
 
