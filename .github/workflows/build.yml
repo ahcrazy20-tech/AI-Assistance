@@ -60,12 +60,15 @@ jobs:
             MarkdownUI:
               url: https://github.com/gonzalezreal/swift-markdown-ui.git
               exactVersion: 2.4.1
+            BlakeHash:
+              url: https://github.com/trancee/blake-hash.git
+              exactVersion: 1.1.0
           settings:
             base:
               SWIFT_VERSION: 5.0
               IPHONEOS_DEPLOYMENT_TARGET: 16.4
-              CURRENT_PROJECT_VERSION: 10
-              MARKETING_VERSION: 1.7.1
+              CURRENT_PROJECT_VERSION: 11
+              MARKETING_VERSION: 1.8.0
               CODE_SIGN_STYLE: Automatic
           targets:
             AIHub:
@@ -77,6 +80,7 @@ jobs:
               dependencies:
                 - package: ZIPFoundation
                 - package: MarkdownUI
+                - package: BlakeHash
               settings:
                 base:
                   PRODUCT_NAME: AIHub
@@ -123,6 +127,8 @@ jobs:
           import ZIPFoundation
           import MarkdownUI
           import NaturalLanguage
+          import WebKit
+          import BlakeHash
           
           // MARK: - Core models
           
@@ -309,7 +315,7 @@ jobs:
           }
           
           enum OutputMode: String, CaseIterable, Identifiable {
-              case answer, table, excel, csv, pdf, word
+              case answer, table, excel, csv, pdf, word, web
               var id: String { rawValue }
               var title: String {
                   switch self {
@@ -319,6 +325,7 @@ jobs:
                   case .csv: return "CSV"
                   case .pdf: return "PDF"
                   case .word: return "Word"
+                  case .web: return "Web Project"
                   }
               }
               var icon: String {
@@ -329,6 +336,7 @@ jobs:
                   case .csv: return "text.append"
                   case .pdf: return "doc.richtext"
                   case .word: return "doc.text"
+                  case .web: return "safari"
                   }
               }
               var instruction: String {
@@ -341,6 +349,8 @@ jobs:
                       return "The answer will be converted into a spreadsheet. Return one or more valid GitHub-Flavored Markdown tables with a header row and consistent column counts. Put a short heading immediately before each table; do not use fake columns or prose inside cells."
                   case .pdf, .word:
                       return "The answer will be exported as a polished document. Use a clear title, short sections, useful headings, lists, and tables where appropriate. Do not include internal notes about file generation."
+                  case .web:
+                      return "Produce a complete runnable static website, not an explanation. For a single-file site return exactly one complete index.html file. For a multi-file site include index.html plus every referenced local CSS, JavaScript, JSON, or SVG file. Return only file blocks in this exact repeated protocol: a line <!-- AIHUB_FILE:path/to/file.ext --> followed immediately by a fenced code block containing that complete file. Use safe relative paths, keep all references consistent, include responsive accessible styling, and never omit code with placeholders. Do not claim the site is hosted; AI Hub will save and preview it, and the user may publish it separately."
                   }
               }
               var automaticExport: ExportFormat? {
@@ -349,12 +359,16 @@ jobs:
                   case .csv: return .csv
                   case .pdf: return .pdf
                   case .word: return .docx
-                  case .answer, .table: return nil
+                  case .answer, .table, .web: return nil
                   }
               }
               static func resolved(selected: OutputMode, prompt: String) -> OutputMode {
                   guard selected == .answer else { return selected }
                   let value = prompt.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                  let creationTerms = ["create", "build", "design", "generate", "write", "make a", "make me", "develop", "code a", "انشئ", "أنشئ", "صمم", "اكتب", "اعمل", "اصنع", "طور", "برمج"]
+                  let webTerms = ["website", "web site", "webpage", "web page", "landing page", "html page", "html site", "موقع", "موقع ويب", "صفحة ويب", "صفحه ويب", "صفحة هبوط", "موقع الكتروني", "موقع إلكتروني"]
+                  if creationTerms.contains(where: value.contains) && (webTerms.contains(where: value.contains) || value.contains("html")) { return .web }
+                  if value.contains("html") && (value.contains("page") || value.contains("site") || value.contains("صفحة") || value.contains("صفحه")) { return .web }
                   if value.contains("xlsx") || value.contains("excel") || value.contains("اكسل") || value.contains("إكسل") || value.contains("اكسيل") || value.contains("إكسيل") { return .excel }
                   if value.contains("csv") { return .csv }
                   if value.contains("pdf") || value.contains("بي دي اف") { return .pdf }
@@ -426,12 +440,13 @@ jobs:
               var sources: [EvidenceSource] = []
               var evidenceReport: EvidenceReport? = nil
               var toolSummary: String? = nil
+              var webProjectID: UUID? = nil
           
               enum CodingKeys: String, CodingKey {
-                  case id, role, text, provider, createdAt, exportFileName, exportFormat, sources, evidenceReport, toolSummary
+                  case id, role, text, provider, createdAt, exportFileName, exportFormat, sources, evidenceReport, toolSummary, webProjectID
               }
           
-              init(id: UUID = UUID(), role: ChatRole, text: String, provider: String? = nil, createdAt: Date = Date(), exportFileName: String? = nil, exportFormat: String? = nil, sources: [EvidenceSource] = [], evidenceReport: EvidenceReport? = nil, toolSummary: String? = nil) {
+              init(id: UUID = UUID(), role: ChatRole, text: String, provider: String? = nil, createdAt: Date = Date(), exportFileName: String? = nil, exportFormat: String? = nil, sources: [EvidenceSource] = [], evidenceReport: EvidenceReport? = nil, toolSummary: String? = nil, webProjectID: UUID? = nil) {
                   self.id = id
                   self.role = role
                   self.text = text
@@ -442,6 +457,7 @@ jobs:
                   self.sources = sources
                   self.evidenceReport = evidenceReport
                   self.toolSummary = toolSummary
+                  self.webProjectID = webProjectID
               }
           
               init(from decoder: Decoder) throws {
@@ -456,6 +472,7 @@ jobs:
                   sources = try box.decodeIfPresent([EvidenceSource].self, forKey: .sources) ?? []
                   evidenceReport = try box.decodeIfPresent(EvidenceReport.self, forKey: .evidenceReport)
                   toolSummary = try box.decodeIfPresent(String.self, forKey: .toolSummary)
+                  webProjectID = try box.decodeIfPresent(UUID.self, forKey: .webProjectID)
               }
           }
           
@@ -607,11 +624,12 @@ jobs:
           // MARK: - State
           
           enum AppTab: Int, CaseIterable, Identifiable, Hashable {
-              case chat, files, images, settings
+              case chat, web, files, images, settings
               var id: Int { rawValue }
               var title: String {
                   switch self {
                   case .chat: return "Chat / المحادثة"
+                  case .web: return "Web Preview / المعاينة"
                   case .files: return "Knowledge / المعرفة"
                   case .images: return "Images / الصور"
                   case .settings: return "Settings / الإعدادات"
@@ -620,6 +638,7 @@ jobs:
               var icon: String {
                   switch self {
                   case .chat: return "message.fill"
+                  case .web: return "safari.fill"
                   case .files: return "books.vertical.fill"
                   case .images: return "photo.fill.on.rectangle.fill"
                   case .settings: return "gearshape.fill"
@@ -734,6 +753,10 @@ jobs:
               func setTavilyKey(_ value: String) throws {
                   try KeychainStore.write(value.trimmingCharacters(in: .whitespacesAndNewlines), account: "tavily")
               }
+              var cloudflarePagesToken: String { KeychainStore.read("cloudflarePages") }
+              func setCloudflarePagesToken(_ value: String) throws {
+                  try KeychainStore.write(value.trimmingCharacters(in: .whitespacesAndNewlines), account: "cloudflarePages")
+              }
           
               func model(for provider: ProviderID, visual: Bool = false) -> String {
                   switch provider {
@@ -804,6 +827,893 @@ jobs:
               @Published var current: InputAttachment?
               @Published var isLoading = false
           }
+          
+          // MARK: - Saved web projects, local preview, and Cloudflare Pages
+          
+          struct WebProject: Identifiable, Codable, Equatable {
+              var id = UUID()
+              var title: String
+              var folderName: String
+              var entryPath = "index.html"
+              var files: [String]
+              var createdAt = Date()
+              var updatedAt = Date()
+              var cloudflareProjectName: String? = nil
+              var publishedURL: String? = nil
+              var lastDeploymentURL: String? = nil
+          
+              var isSingleFile: Bool { files.count == 1 && files.first == entryPath }
+          }
+          
+          struct WebAsset: Sendable {
+              let path: String
+              let data: Data
+          }
+          
+          struct CloudflarePublishResult: Sendable {
+              let publicURL: URL
+              let deploymentURL: URL?
+              let projectName: String
+          }
+          
+          enum WebProjectNaming {
+              static func displayTitle(from prompt: String) -> String {
+                  let clean = prompt.replacingOccurrences(of: "\n", with: " ")
+                      .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                      .trimmingCharacters(in: .whitespacesAndNewlines)
+                  return clean.isEmpty ? "AI Hub Website" : String(clean.prefix(80))
+              }
+          
+              static func cloudflareSlug(title: String, id: UUID) -> String {
+                  let folded = title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX")).lowercased()
+                  var base = folded.replacingOccurrences(of: #"[^a-z0-9]+"#, with: "-", options: .regularExpression)
+                      .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+                  if base.isEmpty { base = "aihub-site" }
+                  base = String(base.prefix(42)).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+                  return "\(base)-\(id.uuidString.lowercased().prefix(6))"
+              }
+          
+              static func validatedCloudflareSlug(_ value: String) throws -> String {
+                  let slug = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                  guard (1...58).contains(slug.count),
+                        slug.range(of: #"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"#, options: .regularExpression) != nil else {
+                      throw ServiceError("Cloudflare project names must be 1–58 lowercase letters, numbers, or hyphens, and cannot begin or end with a hyphen.", kind: .invalidRequest)
+                  }
+                  return slug
+              }
+          }
+          
+          enum WebProjectParser {
+              private static let allowedExtensions: Set<String> = [
+                  "html", "htm", "css", "js", "mjs", "json", "svg", "xml", "txt", "md", "webmanifest", "map"
+              ]
+              private static let allowedExtensionless: Set<String> = ["_headers", "_redirects"]
+              private static let maxFiles = 100
+              private static let maxFileBytes = 5 * 1024 * 1024
+              private static let maxTotalBytes = 20 * 1024 * 1024
+          
+              static func parse(_ response: String) throws -> [String: Data] {
+                  let lines = response.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+                  var pendingPath: String?
+                  var insideFence = false
+                  var language = ""
+                  var buffer: [String] = []
+                  var parsed: [(String?, String, String)] = []
+          
+                  for line in lines {
+                      let trimmed = line.trimmingCharacters(in: .whitespaces)
+                      if !insideFence, let marker = fileMarker(in: trimmed) {
+                          pendingPath = marker
+                          continue
+                      }
+                      if trimmed.hasPrefix("```") {
+                          if insideFence {
+                              parsed.append((pendingPath, language, buffer.joined(separator: "\n")))
+                              pendingPath = nil
+                              language = ""
+                              buffer = []
+                              insideFence = false
+                          } else {
+                              language = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                              buffer = []
+                              insideFence = true
+                          }
+                          continue
+                      }
+                      if insideFence { buffer.append(line) }
+                  }
+                  if insideFence, !buffer.isEmpty {
+                      parsed.append((pendingPath, language, buffer.joined(separator: "\n")))
+                  }
+          
+                  var files: [String: Data] = [:]
+                  var unnamedCounts: [String: Int] = [:]
+                  for item in parsed {
+                      let path = try normalizedPath(item.0 ?? suggestedPath(language: item.1, counts: &unnamedCounts))
+                      let data = Data(item.2.utf8)
+                      try validate(data: data, path: path)
+                      guard !files.keys.contains(where: { $0.caseInsensitiveCompare(path) == .orderedSame }) else {
+                          throw ServiceError("The generated project contains the duplicate file path “\(path)”.", kind: .invalidRequest)
+                      }
+                      files[path] = data
+                  }
+          
+                  if files.isEmpty, let html = rawHTML(in: response) {
+                      let data = Data(html.utf8)
+                      try validate(data: data, path: "index.html")
+                      files["index.html"] = data
+                  }
+          
+                  guard !files.isEmpty else {
+                      throw ServiceError("The provider did not return a usable HTML project. Select Web Project and try again; each file should be in a fenced block preceded by FILE: path.", kind: .provider)
+                  }
+                  guard files.keys.contains(where: { ["html", "htm"].contains(URL(fileURLWithPath: $0).pathExtension.lowercased()) }) else {
+                      throw ServiceError("The generated project has no HTML entry page.", kind: .provider)
+                  }
+                  files = try addingEntryPageIfNeeded(to: files)
+                  guard files.count <= maxFiles else {
+                      throw ServiceError("A generated web project can contain up to \(maxFiles) files.", kind: .invalidRequest)
+                  }
+                  let total = files.values.reduce(0) { $0 + $1.count }
+                  guard total <= maxTotalBytes else {
+                      throw ServiceError("The generated web project exceeds the 20 MB local project limit.", kind: .invalidRequest)
+                  }
+                  return files
+              }
+          
+              private static func fileMarker(in line: String) -> String? {
+                  var value = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                  value = value.replacingOccurrences(of: "<!--", with: "").replacingOccurrences(of: "-->", with: "")
+                  value = value.trimmingCharacters(in: CharacterSet(charactersIn: "#* "))
+                  let upper = value.uppercased()
+                  guard upper.hasPrefix("AIHUB_FILE:") || upper.hasPrefix("FILE:") else { return nil }
+                  guard let colon = value.firstIndex(of: ":") else { return nil }
+                  let result = String(value[value.index(after: colon)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                  return result.isEmpty ? nil : result
+              }
+          
+              private static func suggestedPath(language: String, counts: inout [String: Int]) -> String {
+                  let normalized = language.components(separatedBy: .whitespaces).first ?? ""
+                  let kind: String
+                  switch normalized {
+                  case "html", "htm": kind = "html"
+                  case "css", "scss": kind = "css"
+                  case "javascript", "js", "typescript", "ts": kind = "js"
+                  case "svg": kind = "svg"
+                  case "json": kind = "json"
+                  default: kind = "txt"
+                  }
+                  let index = counts[kind, default: 0]
+                  counts[kind] = index + 1
+                  switch (kind, index) {
+                  case ("html", 0): return "index.html"
+                  case ("css", 0): return "style.css"
+                  case ("js", 0): return "script.js"
+                  case ("svg", 0): return "asset.svg"
+                  case ("json", 0): return "data.json"
+                  default: return "file-\(index + 1).\(kind)"
+                  }
+              }
+          
+              private static func normalizedPath(_ raw: String) throws -> String {
+                  var path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                      .replacingOccurrences(of: "\\", with: "/")
+                      .replacingOccurrences(of: "`", with: "")
+                  while path.hasPrefix("./") { path.removeFirst(2) }
+                  guard !path.isEmpty, !path.hasPrefix("/"), path.utf8.count <= 240, !path.contains(":") else {
+                      throw ServiceError("Unsafe or invalid generated file path: \(raw)", kind: .invalidRequest)
+                  }
+                  let components = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+                  let safeComponentPattern = #"^[A-Za-z0-9_@. -]+$"#
+                  guard !components.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." || $0.hasPrefix(".") }),
+                        !components.contains(where: { $0 == ".git" || $0 == "node_modules" || $0 == ".wrangler" }),
+                        components.allSatisfy({ $0.range(of: safeComponentPattern, options: .regularExpression) != nil }) else {
+                      throw ServiceError("Unsafe generated file path: \(raw). Use plain letters, numbers, spaces, dots, underscores, @, or hyphens.", kind: .invalidRequest)
+                  }
+                  path = components.joined(separator: "/")
+                  let name = components.last ?? ""
+                  let ext = URL(fileURLWithPath: name).pathExtension.lowercased()
+                  guard allowedExtensions.contains(ext) || (ext.isEmpty && allowedExtensionless.contains(name)) else {
+                      throw ServiceError("Unsupported generated web file type: \(path). Use HTML, CSS, JavaScript, JSON, SVG, text, or web-manifest files.", kind: .unsupported)
+                  }
+                  return path
+              }
+          
+              private static func validate(data: Data, path: String) throws {
+                  guard data.count <= maxFileBytes else {
+                      throw ServiceError("Generated file \(path) exceeds the 5 MB per-file limit.", kind: .invalidRequest)
+                  }
+                  guard String(data: data, encoding: .utf8) != nil else {
+                      throw ServiceError("Generated file \(path) is not valid UTF-8 text.", kind: .invalidRequest)
+                  }
+              }
+          
+              private static func rawHTML(in response: String) -> String? {
+                  let starts = ["<!doctype html", "<html"].compactMap { response.range(of: $0, options: .caseInsensitive)?.lowerBound }
+                  guard let start = starts.min() else { return nil }
+                  if let end = response.range(of: "</html>", options: [.caseInsensitive, .backwards], range: start..<response.endIndex)?.upperBound {
+                      return String(response[start..<end])
+                  }
+                  return String(response[start...])
+              }
+          
+              private static func addingEntryPageIfNeeded(to input: [String: Data]) throws -> [String: Data] {
+                  if input["index.html"] != nil { return input }
+                  var output = input
+                  let htmlPaths = input.keys.filter { ["html", "htm"].contains(URL(fileURLWithPath: $0).pathExtension.lowercased()) }.sorted()
+                  guard let source = htmlPaths.first, let data = input[source] else { return input }
+                  if !source.contains("/") {
+                      output["index.html"] = data
+                  } else {
+                      let target = source.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? source
+                      let escaped = target.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "\"", with: "&quot;")
+                      let wrapper = "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"refresh\" content=\"0;url=\(escaped)\"><title>Opening site…</title></head><body><p><a href=\"\(escaped)\">Open website</a></p></body></html>"
+                      output["index.html"] = Data(wrapper.utf8)
+                  }
+                  return output
+              }
+          }
+          
+          @MainActor final class WebProjectStore: ObservableObject {
+              @Published private(set) var projects: [WebProject] = [] { didSet { saveIndex() } }
+              @Published var selectedID: UUID? = nil { didSet { UserDefaults.standard.set(selectedID?.uuidString, forKey: "selectedWebProjectID") } }
+          
+              private let fileManager = FileManager.default
+              private let rootURL: URL
+              private let indexURL: URL
+          
+              init() {
+                  let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                  rootURL = documents.appendingPathComponent("AIHubWebProjects", isDirectory: true)
+                  indexURL = rootURL.appendingPathComponent("projects.json")
+                  try? fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+                  if let data = try? Data(contentsOf: indexURL), let decoded = try? JSONDecoder().decode([WebProject].self, from: data) {
+                      projects = decoded.filter { fileManager.fileExists(atPath: rootURL.appendingPathComponent($0.folderName).path) }
+                  }
+                  if let raw = UserDefaults.standard.string(forKey: "selectedWebProjectID"), let id = UUID(uuidString: raw), projects.contains(where: { $0.id == id }) {
+                      selectedID = id
+                  } else {
+                      selectedID = projects.sorted(by: { $0.updatedAt > $1.updatedAt }).first?.id
+                  }
+              }
+          
+              var selectedProject: WebProject? {
+                  guard let selectedID else { return projects.sorted(by: { $0.updatedAt > $1.updatedAt }).first }
+                  return projects.first(where: { $0.id == selectedID })
+              }
+          
+              func project(id: UUID) -> WebProject? { projects.first(where: { $0.id == id }) }
+          
+              @discardableResult
+              func create(from response: String, title: String) throws -> WebProject {
+                  let files = try WebProjectParser.parse(response)
+                  let id = UUID()
+                  let folderName = id.uuidString.lowercased()
+                  let folder = rootURL.appendingPathComponent(folderName, isDirectory: true)
+                  try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+                  do {
+                      for (path, data) in files {
+                          let url = folder.appendingPathComponent(path)
+                          try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                          try data.write(to: url, options: .atomic)
+                      }
+                      let project = WebProject(title: WebProjectNaming.displayTitle(from: title), folderName: folderName, files: files.keys.sorted())
+                      projects.insert(project, at: 0)
+                      selectedID = project.id
+                      return project
+                  } catch {
+                      try? fileManager.removeItem(at: folder)
+                      throw error
+                  }
+              }
+          
+              func select(_ id: UUID) { if projects.contains(where: { $0.id == id }) { selectedID = id } }
+          
+              func delete(_ project: WebProject) {
+                  try? fileManager.removeItem(at: projectFolder(project))
+                  projects.removeAll { $0.id == project.id }
+                  if selectedID == project.id { selectedID = projects.first?.id }
+              }
+          
+              func projectFolder(_ project: WebProject) -> URL { rootURL.appendingPathComponent(project.folderName, isDirectory: true) }
+              func entryURL(_ project: WebProject) -> URL { projectFolder(project).appendingPathComponent(project.entryPath) }
+          
+              func data(for path: String, in project: WebProject) throws -> Data {
+                  guard project.files.contains(path) else { throw ServiceError("This web-project file is no longer indexed.", kind: .unsupported) }
+                  return try Data(contentsOf: projectFolder(project).appendingPathComponent(path), options: .mappedIfSafe)
+              }
+          
+              func text(for path: String, in project: WebProject) -> String {
+                  guard let data = try? data(for: path, in: project) else { return "Could not read this file." }
+                  return String(data: data, encoding: .utf8) ?? "This file is not UTF-8 text."
+              }
+          
+              func assets(for project: WebProject) throws -> [WebAsset] {
+                  try project.files.map { WebAsset(path: $0, data: try data(for: $0, in: project)) }
+              }
+          
+              func makeZIP(for project: WebProject) throws -> URL {
+                  let exportFolder = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("AIHubWebExports", isDirectory: true)
+                  try fileManager.createDirectory(at: exportFolder, withIntermediateDirectories: true)
+                  let safeTitle = project.title.replacingOccurrences(of: #"[^A-Za-z0-9\u0600-\u06FF]+"#, with: "-", options: .regularExpression)
+                      .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+                  let base = safeTitle.isEmpty ? "AIHub-Website" : String(safeTitle.prefix(42))
+                  let url = exportFolder.appendingPathComponent("\(base)-\(String(project.id.uuidString.prefix(6))).zip")
+                  try? fileManager.removeItem(at: url)
+                  guard let archive = Archive(url: url, accessMode: .create) else {
+                      throw ServiceError("Could not create the website ZIP archive.", kind: .provider)
+                  }
+                  for path in project.files.sorted() {
+                      let data = try self.data(for: path, in: project)
+                      try archive.addEntry(with: path, type: .file, uncompressedSize: Int64(data.count), compressionMethod: .deflate) { position, size in
+                          let start = Int(position)
+                          guard start < data.count else { return Data() }
+                          return data.subdata(in: start..<min(data.count, start + size))
+                      }
+                  }
+                  return url
+              }
+          
+              func markPublished(projectID: UUID, cloudflareName: String, publicURL: URL, deploymentURL: URL?) {
+                  guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return }
+                  projects[index].cloudflareProjectName = cloudflareName
+                  projects[index].publishedURL = publicURL.absoluteString
+                  projects[index].lastDeploymentURL = deploymentURL?.absoluteString
+                  projects[index].updatedAt = Date()
+                  selectedID = projectID
+              }
+          
+              private func saveIndex() {
+                  guard let data = try? JSONEncoder().encode(projects) else { return }
+                  try? fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+                  try? data.write(to: indexURL, options: .atomic)
+              }
+          }
+          
+          actor CloudflarePagesService {
+              static let shared = CloudflarePagesService()
+              private let apiRoot = URL(string: "https://api.cloudflare.com/client/v4/")!
+              private let userAgent = "AIHub/1.8.0 (iOS)"
+          
+              func testPermissions(accountID: String, token: String) async -> KeyCheckState {
+                  let account = accountID.trimmingCharacters(in: .whitespacesAndNewlines)
+                  let apiToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+                  guard !account.isEmpty, !apiToken.isEmpty else { return .missing }
+                  do {
+                      _ = try await requestJSON(path: "accounts/\(account)/pages/projects?per_page=1", method: "GET", token: apiToken)
+                      return .valid("Cloudflare Pages authorized")
+                  } catch {
+                      return .invalid(error.localizedDescription)
+                  }
+              }
+          
+              func publish(projectName rawName: String, accountID: String, apiToken: String, assets: [WebAsset]) async throws -> CloudflarePublishResult {
+                  let projectName = try WebProjectNaming.validatedCloudflareSlug(rawName)
+                  let account = accountID.trimmingCharacters(in: .whitespacesAndNewlines)
+                  let token = apiToken.trimmingCharacters(in: .whitespacesAndNewlines)
+                  guard !account.isEmpty else { throw ServiceError("Add your Cloudflare Account ID in Settings before publishing.", kind: .configuration) }
+                  guard !token.isEmpty else { throw ServiceError("Add a Cloudflare Pages API token in Settings, or allow AI Hub to reuse the saved Workers AI token.", kind: .configuration) }
+                  guard !assets.isEmpty, assets.count <= 20_000 else { throw ServiceError("Cloudflare Pages requires 1–20,000 deployable files.", kind: .invalidRequest) }
+                  if assets.contains(where: { $0.path == "_worker.js" || $0.path.hasPrefix("functions/") || $0.path == "_routes.json" }) {
+                      throw ServiceError("This publisher supports static HTML/CSS/JavaScript projects. Pages Functions, _worker.js, and _routes.json are not included in this release.", kind: .unsupported)
+                  }
+          
+                  try await ensureProject(name: projectName, account: account, token: token)
+                  let uploadToken = try await getUploadToken(project: projectName, account: account, token: token)
+          
+                  let specialNames: Set<String> = ["_headers", "_redirects"]
+                  let ordinary = assets.filter { !specialNames.contains($0.path) }
+                  var manifest: [String: String] = [:]
+                  var uniqueUploads: [String: (asset: WebAsset, base64: String)] = [:]
+                  for asset in ordinary {
+                      let base64 = asset.data.base64EncodedString()
+                      let hash = pagesHash(base64: base64, path: asset.path)
+                      manifest["/" + asset.path] = hash
+                      uniqueUploads[hash] = (asset, base64)
+                  }
+                  guard manifest["/index.html"] != nil else { throw ServiceError("The website has no /index.html deployment entry.", kind: .invalidRequest) }
+          
+                  var batch: [[String: Any]] = []
+                  var estimatedBytes = 0
+                  for (hash, item) in uniqueUploads.sorted(by: { $0.key < $1.key }) {
+                      let size = item.base64.utf8.count + 512
+                      if !batch.isEmpty, estimatedBytes + size > 38 * 1024 * 1024 {
+                          try await upload(batch: batch, uploadToken: uploadToken)
+                          batch = []
+                          estimatedBytes = 0
+                      }
+                      batch.append([
+                          "key": hash,
+                          "value": item.base64,
+                          "metadata": ["contentType": contentType(for: item.asset.path)],
+                          "base64": true
+                      ])
+                      estimatedBytes += size
+                  }
+                  if !batch.isEmpty { try await upload(batch: batch, uploadToken: uploadToken) }
+                  _ = try await requestJSON(
+                      path: "pages/assets/upsert-hashes",
+                      method: "POST",
+                      token: uploadToken,
+                      jsonBody: ["hashes": Array(uniqueUploads.keys)]
+                  )
+          
+                  let deploymentObject = try await createDeployment(
+                      project: projectName,
+                      account: account,
+                      token: token,
+                      manifest: manifest,
+                      specialAssets: assets.filter { specialNames.contains($0.path) }
+                  )
+                  let deploymentString = deploymentObject["url"] as? String
+                  let deploymentURL = deploymentString.flatMap(URL.init(string:))
+                  guard let publicURL = URL(string: "https://\(projectName).pages.dev") else {
+                      throw ServiceError("Cloudflare deployed the project but returned an invalid public URL.", kind: .provider)
+                  }
+                  return CloudflarePublishResult(publicURL: publicURL, deploymentURL: deploymentURL, projectName: projectName)
+              }
+          
+              private func ensureProject(name: String, account: String, token: String) async throws {
+                  let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+                  let path = "accounts/\(account)/pages/projects/\(encoded)"
+                  let (_, response) = try await rawRequest(path: path, method: "GET", token: token)
+                  if response.statusCode == 404 {
+                      _ = try await requestJSON(
+                          path: "accounts/\(account)/pages/projects",
+                          method: "POST",
+                          token: token,
+                          jsonBody: ["name": name, "production_branch": "main"]
+                      )
+                      return
+                  }
+                  _ = try await requestJSON(path: path, method: "GET", token: token)
+              }
+          
+              private func getUploadToken(project: String, account: String, token: String) async throws -> String {
+                  let encoded = project.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? project
+                  let path = "accounts/\(account)/pages/projects/\(encoded)/upload-token"
+                  let result: Any
+                  do {
+                      result = try await requestJSON(path: path, method: "POST", token: token)
+                  } catch let error as ServiceError where error.statusCode == 404 || error.statusCode == 405 {
+                      result = try await requestJSON(path: path, method: "GET", token: token)
+                  }
+                  if let box = result as? [String: Any], let jwt = box["jwt"] as? String, !jwt.isEmpty { return jwt }
+                  if let jwt = result as? String, !jwt.isEmpty { return jwt }
+                  throw ServiceError("Cloudflare did not return the short-lived Pages asset-upload token.", kind: .provider)
+              }
+          
+              private func upload(batch: [[String: Any]], uploadToken: String) async throws {
+                  _ = try await requestJSON(path: "pages/assets/upload", method: "POST", token: uploadToken, jsonArrayBody: batch)
+              }
+          
+              private func createDeployment(project: String, account: String, token: String, manifest: [String: String], specialAssets: [WebAsset]) async throws -> [String: Any] {
+                  let boundary = "AIHubPages-" + UUID().uuidString
+                  var body = Data()
+                  let manifestData = try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys])
+                  appendField(name: "manifest", value: String(decoding: manifestData, as: UTF8.self), boundary: boundary, to: &body)
+                  appendField(name: "branch", value: "main", boundary: boundary, to: &body)
+                  for asset in specialAssets {
+                      appendFile(name: asset.path, filename: asset.path, mimeType: "text/plain; charset=utf-8", data: asset.data, boundary: boundary, to: &body)
+                  }
+                  body.append(Data("--\(boundary)--\r\n".utf8))
+                  let encoded = project.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? project
+                  let result = try await requestJSON(
+                      path: "accounts/\(account)/pages/projects/\(encoded)/deployments",
+                      method: "POST",
+                      token: token,
+                      body: body,
+                      contentType: "multipart/form-data; boundary=\(boundary)"
+                  )
+                  guard let object = result as? [String: Any] else { throw ServiceError("Cloudflare returned an invalid deployment response.", kind: .provider) }
+                  let failedStatuses: Set<String> = ["failure", "failed", "canceled", "cancelled"]
+                  if let stage = object["latest_stage"] as? [String: Any],
+                     let status = (stage["status"] as? String)?.lowercased() {
+                      let failed = failedStatuses.contains(status)
+                      if failed {
+                          let name = (stage["name"] as? String) ?? "deployment"
+                          throw ServiceError("Cloudflare Pages reported a failed \(name) stage.", kind: .provider)
+                      }
+                  }
+                  return object
+              }
+          
+              private func pagesHash(base64: String, path: String) -> String {
+                  let ext = URL(fileURLWithPath: path).pathExtension
+                  let digest = BLAKE3.hash(Data((base64 + ext).utf8))
+                  return digest.prefix(16).map { String(format: "%02x", $0) }.joined()
+              }
+          
+              private func contentType(for path: String) -> String {
+                  switch URL(fileURLWithPath: path).pathExtension.lowercased() {
+                  case "html", "htm": return "text/html; charset=utf-8"
+                  case "css": return "text/css; charset=utf-8"
+                  case "js", "mjs": return "application/javascript; charset=utf-8"
+                  case "json", "map": return "application/json; charset=utf-8"
+                  case "svg": return "image/svg+xml"
+                  case "xml": return "application/xml; charset=utf-8"
+                  case "webmanifest": return "application/manifest+json; charset=utf-8"
+                  case "md": return "text/markdown; charset=utf-8"
+                  default: return "text/plain; charset=utf-8"
+                  }
+              }
+          
+              private func requestJSON(path: String, method: String, token: String, jsonBody: [String: Any]? = nil, jsonArrayBody: [[String: Any]]? = nil, body: Data? = nil, contentType: String? = nil) async throws -> Any {
+                  var payload = body
+                  var type = contentType
+                  if let jsonBody {
+                      payload = try JSONSerialization.data(withJSONObject: jsonBody)
+                      type = "application/json"
+                  } else if let jsonArrayBody {
+                      payload = try JSONSerialization.data(withJSONObject: jsonArrayBody)
+                      type = "application/json"
+                  }
+                  let (data, response) = try await rawRequest(path: path, method: method, token: token, body: payload, contentType: type)
+                  let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+                  let success = object?["success"] as? Bool
+                  guard (200..<300).contains(response.statusCode), success != false else {
+                      throw cloudflareError(status: response.statusCode, object: object, data: data)
+                  }
+                  if let result = object?["result"], !(result is NSNull) { return result }
+                  return [String: Any]()
+              }
+          
+              private func rawRequest(path: String, method: String, token: String, body: Data? = nil, contentType: String? = nil) async throws -> (Data, HTTPURLResponse) {
+                  guard let url = URL(string: path, relativeTo: apiRoot)?.absoluteURL else { throw ServiceError("Invalid Cloudflare API URL.", kind: .configuration) }
+                  var request = URLRequest(url: url)
+                  request.httpMethod = method
+                  request.timeoutInterval = 120
+                  request.httpBody = body
+                  request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                  request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+                  request.setValue("application/json", forHTTPHeaderField: "Accept")
+                  if let contentType { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
+                  let (data, rawResponse) = try await URLSession.shared.data(for: request)
+                  guard let response = rawResponse as? HTTPURLResponse else { throw ServiceError("Cloudflare returned an invalid HTTP response.", kind: .provider) }
+                  return (data, response)
+              }
+          
+              private func cloudflareError(status: Int, object: [String: Any]?, data: Data) -> ServiceError {
+                  let errors = object?["errors"] as? [[String: Any]]
+                  let messages = errors?.compactMap { item -> String? in
+                      let message = item["message"] as? String
+                      let code = (item["code"] as? NSNumber)?.stringValue
+                      if let code, let message { return "\(message) [\(code)]" }
+                      return message
+                  } ?? []
+                  let fallback = String(data: data, encoding: .utf8) ?? "Unknown Cloudflare error"
+                  let detail = messages.isEmpty ? String(fallback.prefix(600)) : messages.joined(separator: "; ")
+                  let folded = detail.lowercased()
+                  if status == 401 || status == 403 || folded.contains("permission") || folded.contains("not authorized") || folded.contains("authentication") {
+                      return ServiceError("Cloudflare Pages authorization failed. The API token needs Account → Cloudflare Pages → Edit. Also add Account → Account Settings → Read for account validation. A Workers AI token does not automatically include Pages access. Cloudflare response: \(detail)", statusCode: status, kind: .authentication)
+                  }
+                  return ServiceError("Cloudflare Pages: \(detail)", statusCode: status, kind: status == 429 ? .quota : .provider)
+              }
+          
+              private func appendField(name: String, value: String, boundary: String, to body: inout Data) {
+                  body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n".utf8))
+              }
+          
+              private func appendFile(name: String, filename: String, mimeType: String, data: Data, boundary: String, to body: inout Data) {
+                  body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\nContent-Type: \(mimeType)\r\n\r\n".utf8))
+                  body.append(data)
+                  body.append(Data("\r\n".utf8))
+              }
+          }
+          
+          struct LocalWebView: UIViewRepresentable {
+              let entryURL: URL
+              let rootURL: URL
+              @Binding var loadError: String?
+          
+              func makeCoordinator() -> Coordinator { Coordinator(loadError: $loadError) }
+          
+              func makeUIView(context: Context) -> WKWebView {
+                  let configuration = WKWebViewConfiguration()
+                  configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+                  configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+                  let webView = WKWebView(frame: .zero, configuration: configuration)
+                  webView.navigationDelegate = context.coordinator
+                  webView.allowsBackForwardNavigationGestures = true
+                  webView.isOpaque = false
+                  webView.backgroundColor = .clear
+                  load(webView)
+                  return webView
+              }
+          
+              func updateUIView(_ webView: WKWebView, context: Context) {
+                  if webView.url?.standardizedFileURL != entryURL.standardizedFileURL { load(webView) }
+              }
+          
+              private func load(_ webView: WKWebView) {
+                  loadError = nil
+                  webView.loadFileURL(entryURL, allowingReadAccessTo: rootURL)
+              }
+          
+              final class Coordinator: NSObject, WKNavigationDelegate {
+                  @Binding var loadError: String?
+                  init(loadError: Binding<String?>) { _loadError = loadError }
+          
+                  func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { loadError = error.localizedDescription }
+                  func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { loadError = error.localizedDescription }
+                  func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+                      if navigationAction.navigationType == .linkActivated,
+                         let url = navigationAction.request.url,
+                         let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) {
+                          UIApplication.shared.open(url)
+                          decisionHandler(.cancel)
+                          return
+                      }
+                      decisionHandler(.allow)
+                  }
+              }
+          }
+          
+          struct WebPreviewView: View {
+              @EnvironmentObject private var projects: WebProjectStore
+              @EnvironmentObject private var navigation: NavigationState
+              @EnvironmentObject private var settings: AppSettings
+              @State private var refreshID = UUID()
+              @State private var loadError: String?
+              @State private var shareItem: SharedFile?
+              @State private var sourceProject: WebProject?
+              @State private var publishProject: WebProject?
+              @State private var deleteRequested = false
+              @State private var actionError = ""
+              @State private var showActionError = false
+          
+              var body: some View {
+                  NavigationStack {
+                      Group {
+                          if let project = projects.selectedProject {
+                              VStack(spacing: 0) {
+                                  projectHeader(project)
+                                  if let loadError {
+                                      Label(loadError, systemImage: "exclamationmark.triangle.fill")
+                                          .font(.caption).foregroundStyle(.orange).padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                                          .background(Color.orange.opacity(0.09))
+                                  }
+                                  LocalWebView(entryURL: projects.entryURL(project), rootURL: projects.projectFolder(project), loadError: $loadError)
+                                      .id("\(project.id.uuidString)-\(refreshID.uuidString)")
+                                      .background(Color.white)
+                              }
+                          } else {
+                              VStack(spacing: 15) {
+                                  Image(systemName: "safari").font(.system(size: 52)).foregroundStyle(.indigo)
+                                  Text("No saved website").font(.title2.bold())
+                                  Text("Ask AI Hub to create a website, or choose Web Project before sending. HTML, CSS, and JavaScript will be saved here and previewed locally.")
+                                      .multilineTextAlignment(.center).foregroundStyle(.secondary).padding(.horizontal, 28)
+                                  Button("Create in Chat") {
+                                      settings.outputMode = .web
+                                      navigation.selectedTab = .chat
+                                  }.buttonStyle(.borderedProminent)
+                              }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                          }
+                      }
+                      .navigationTitle("Web Preview / معاينة")
+                      .navigationBarTitleDisplayMode(.inline)
+                      .toolbar {
+                          ToolbarItem(placement: .navigationBarLeading) { TopTabMenu() }
+                          ToolbarItem(placement: .navigationBarTrailing) {
+                              if let project = projects.selectedProject { projectMenu(project) }
+                          }
+                      }
+                  }
+                  .sheet(item: $shareItem) { ShareSheet(items: [$0.url]) }
+                  .sheet(item: $sourceProject) { WebSourceBrowser(project: $0).environmentObject(projects) }
+                  .sheet(item: $publishProject) { PublishWebsiteSheet(projectID: $0.id) }
+                  .alert("Delete website?", isPresented: $deleteRequested) {
+                      Button("Delete", role: .destructive) { if let project = projects.selectedProject { projects.delete(project) } }
+                      Button("Cancel", role: .cancel) {}
+                  } message: { Text("The local project files will be removed. A previously published Cloudflare site is not deleted from Cloudflare.") }
+                  .alert("Website Error", isPresented: $showActionError) { Button("OK", role: .cancel) {} } message: { Text(actionError) }
+              }
+          
+              private func projectHeader(_ project: WebProject) -> some View {
+                  VStack(spacing: 8) {
+                      HStack(spacing: 10) {
+                          Menu {
+                              ForEach(projects.projects.sorted(by: { $0.updatedAt > $1.updatedAt })) { item in
+                                  Button { projects.select(item.id); refreshID = UUID() } label: {
+                                      if item.id == project.id { Label(item.title, systemImage: "checkmark") }
+                                      else { Text(item.title) }
+                                  }
+                              }
+                          } label: {
+                              HStack(spacing: 6) {
+                                  Image(systemName: "folder.fill")
+                                  Text(project.title).lineLimit(1)
+                                  Image(systemName: "chevron.down").font(.caption2)
+                              }.font(.subheadline.bold())
+                          }
+                          Spacer()
+                          Text(project.isSingleFile ? "1 HTML" : "\(project.files.count) files")
+                              .font(.caption2.bold()).foregroundStyle(.secondary)
+                              .padding(.horizontal, 8).padding(.vertical, 5).background(Color.secondary.opacity(0.1), in: Capsule())
+                          Button { refreshID = UUID() } label: { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Refresh preview")
+                      }
+                      if let value = project.publishedURL, let url = URL(string: value) {
+                          HStack(spacing: 8) {
+                              Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                              Text(url.host ?? value).font(.caption.monospaced()).lineLimit(1)
+                              Spacer()
+                              Button { UIPasteboard.general.string = value; UINotificationFeedbackGenerator().notificationOccurred(.success) } label: { Image(systemName: "doc.on.doc") }
+                              Button { UIApplication.shared.open(url) } label: { Image(systemName: "arrow.up.right.square") }
+                          }
+                          .padding(8).background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                      }
+                  }
+                  .padding(.horizontal, 12).padding(.vertical, 9)
+                  .background(.ultraThinMaterial)
+              }
+          
+              @ViewBuilder private func projectMenu(_ project: WebProject) -> some View {
+                  Menu {
+                      Button { sourceProject = project } label: { Label("Browse source files", systemImage: "chevron.left.forwardslash.chevron.right") }
+                      Button { shareItem = SharedFile(url: projects.entryURL(project)) } label: { Label("Share index.html only", systemImage: "doc") }
+                      Button { shareZIP(project) } label: { Label("Share full project ZIP", systemImage: "archivebox") }
+                      Divider()
+                      Button { publishProject = project } label: { Label(project.publishedURL == nil ? "Publish to Cloudflare" : "Publish update", systemImage: "icloud.and.arrow.up") }
+                      if let value = project.publishedURL, let url = URL(string: value) {
+                          Button { UIApplication.shared.open(url) } label: { Label("Open public website", systemImage: "globe") }
+                      }
+                      Divider()
+                      Button(role: .destructive) { deleteRequested = true } label: { Label("Delete local project", systemImage: "trash") }
+                  } label: { Image(systemName: "ellipsis.circle") }
+              }
+          
+              private func shareZIP(_ project: WebProject) {
+                  do { shareItem = SharedFile(url: try projects.makeZIP(for: project)) }
+                  catch { actionError = error.localizedDescription; showActionError = true }
+              }
+          }
+          
+          struct WebSourceBrowser: View {
+              let project: WebProject
+              @EnvironmentObject private var projects: WebProjectStore
+              @Environment(\.dismiss) private var dismiss
+          
+              var body: some View {
+                  NavigationStack {
+                      List(project.files.sorted(), id: \.self) { path in
+                          NavigationLink {
+                              WebSourceFileView(path: path, content: projects.text(for: path, in: project))
+                          } label: {
+                              VStack(alignment: .leading, spacing: 3) {
+                                  Label(path, systemImage: sourceIcon(path)).font(.subheadline.monospaced()).lineLimit(2)
+                                  if let data = try? projects.data(for: path, in: project) { Text(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file)).font(.caption).foregroundStyle(.secondary) }
+                              }
+                          }
+                      }
+                      .navigationTitle("Project Source")
+                      .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Done") { dismiss() } } }
+                  }
+              }
+          
+              private func sourceIcon(_ path: String) -> String {
+                  switch URL(fileURLWithPath: path).pathExtension.lowercased() {
+                  case "html", "htm": return "safari"
+                  case "css": return "paintbrush"
+                  case "js", "mjs": return "curlybraces"
+                  case "svg": return "photo"
+                  default: return "doc.text"
+                  }
+              }
+          }
+          
+          struct WebSourceFileView: View {
+              let path: String
+              let content: String
+              var body: some View {
+                  ScrollView([.horizontal, .vertical]) {
+                      Text(content).font(.system(size: 12, design: .monospaced)).textSelection(.enabled).padding().frame(maxWidth: .infinity, alignment: .topLeading)
+                  }.navigationTitle(path).navigationBarTitleDisplayMode(.inline)
+              }
+          }
+          
+          struct PublishWebsiteSheet: View {
+              let projectID: UUID
+              @EnvironmentObject private var projects: WebProjectStore
+              @EnvironmentObject private var settings: AppSettings
+              @EnvironmentObject private var navigation: NavigationState
+              @Environment(\.dismiss) private var dismiss
+              @State private var projectName = ""
+              @State private var isPublishing = false
+              @State private var status = ""
+              @State private var publicURL: URL?
+              @State private var errorMessage = ""
+              @State private var showError = false
+              @State private var showShare = false
+          
+              var body: some View {
+                  NavigationStack {
+                      Form {
+                          Section("Cloudflare Pages project") {
+                              TextField("Project name", text: $projectName).textInputAutocapitalization(.never).autocorrectionDisabled()
+                              TextField("Cloudflare Account ID", text: $settings.cloudflareAccountID).textInputAutocapitalization(.never).autocorrectionDisabled()
+                              LabeledContent("Credential", value: settings.cloudflarePagesToken.isEmpty ? "Saved Workers AI token" : "Dedicated Pages token")
+                              Text("Publishing is optional. Local Web Preview and project export work without Cloudflare.").font(.caption).foregroundStyle(.secondary)
+                          }
+          
+                          Section("Permission required") {
+                              Label("Account → Cloudflare Pages → Edit", systemImage: "key.fill").foregroundStyle(.indigo)
+                              Text("Account → Account Settings → Read is also recommended for validation. A token that only has Workers AI permission cannot publish Pages sites.").font(.caption).foregroundStyle(.secondary)
+                              Button("Open Settings") { dismiss(); navigation.selectedTab = .settings }
+                          }
+          
+                          if isPublishing {
+                              Section { HStack { ProgressView(); Text(status.isEmpty ? "Publishing project…" : status) } }
+                          }
+          
+                          if let publicURL {
+                              Section("Public HTTPS link") {
+                                  Link(publicURL.absoluteString, destination: publicURL).font(.footnote.monospaced()).textSelection(.enabled)
+                                  HStack {
+                                      Button { UIPasteboard.general.string = publicURL.absoluteString; UINotificationFeedbackGenerator().notificationOccurred(.success) } label: { Label("Copy", systemImage: "doc.on.doc") }
+                                      Spacer()
+                                      Button { showShare = true } label: { Label("Share", systemImage: "square.and.arrow.up") }
+                                      Spacer()
+                                      Button { UIApplication.shared.open(publicURL) } label: { Label("Open", systemImage: "arrow.up.right.square") }
+                                  }
+                              }
+                          }
+          
+                          Section {
+                              Button { publish() } label: {
+                                  HStack { Spacer(); Label(publicURL == nil ? "Publish Website" : "Publish Update", systemImage: "icloud.and.arrow.up.fill"); Spacer() }
+                              }
+                              .disabled(isPublishing || projectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || settings.cloudflareAccountID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || activeToken.isEmpty)
+                          } footer: {
+                              if activeToken.isEmpty { Text("No Cloudflare token is saved. Add a dedicated Pages token or a compatible Cloudflare token in Settings.").foregroundStyle(.orange) }
+                              else { Text("The public production address remains stable when you publish updates using the same project name.") }
+                          }
+                      }
+                      .navigationTitle("Publish Website")
+                      .navigationBarTitleDisplayMode(.inline)
+                      .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+                  }
+                  .onAppear {
+                      guard let project = projects.project(id: projectID) else { return }
+                      projectName = project.cloudflareProjectName ?? WebProjectNaming.cloudflareSlug(title: project.title, id: project.id)
+                      publicURL = project.publishedURL.flatMap(URL.init(string:))
+                  }
+                  .sheet(isPresented: $showShare) { if let publicURL { ShareSheet(items: [publicURL]) } }
+                  .alert("Cloudflare Publish Error", isPresented: $showError) { Button("OK", role: .cancel) {} } message: { Text(errorMessage) }
+              }
+          
+              private var activeToken: String {
+                  let dedicated = settings.cloudflarePagesToken.trimmingCharacters(in: .whitespacesAndNewlines)
+                  return dedicated.isEmpty ? settings.key(for: .cloudflare).trimmingCharacters(in: .whitespacesAndNewlines) : dedicated
+              }
+          
+              private func publish() {
+                  guard let project = projects.project(id: projectID) else { return }
+                  isPublishing = true
+                  status = "Hashing and uploading project files…"
+                  Task {
+                      defer { isPublishing = false }
+                      do {
+                          let assets = try projects.assets(for: project)
+                          let result = try await CloudflarePagesService.shared.publish(
+                              projectName: projectName,
+                              accountID: settings.cloudflareAccountID,
+                              apiToken: activeToken,
+                              assets: assets
+                          )
+                          projects.markPublished(projectID: projectID, cloudflareName: result.projectName, publicURL: result.publicURL, deploymentURL: result.deploymentURL)
+                          projectName = result.projectName
+                          publicURL = result.publicURL
+                          status = "Published"
+                          UINotificationFeedbackGenerator().notificationOccurred(.success)
+                      } catch {
+                          errorMessage = error.localizedDescription
+                          showError = true
+                          UINotificationFeedbackGenerator().notificationOccurred(.error)
+                      }
+                  }
+              }
+          }
+          
           
           @MainActor final class UsageLedger: ObservableObject {
               @Published private(set) var total = 0
@@ -1314,7 +2224,7 @@ jobs:
                   request.timeoutInterval = 30
                   request.cachePolicy = .reloadIgnoringLocalCacheData
                   request.setValue("application/json", forHTTPHeaderField: "Accept")
-                  request.setValue("AIHub/1.7.1 (iOS)", forHTTPHeaderField: "User-Agent")
+                  request.setValue("AIHub/1.8.0 (iOS)", forHTTPHeaderField: "User-Agent")
                   let (data, response) = try await URLSession.shared.data(for: request)
                   guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
                       throw ServiceError("Frankfurter live rates are temporarily unavailable.", statusCode: (response as? HTTPURLResponse)?.statusCode, kind: .transient)
@@ -1339,7 +2249,7 @@ jobs:
                   request.timeoutInterval = 30
                   request.cachePolicy = .returnCacheDataElseLoad
                   request.setValue("application/json", forHTTPHeaderField: "Accept")
-                  request.setValue("AIHub/1.7.1 (iOS)", forHTTPHeaderField: "User-Agent")
+                  request.setValue("AIHub/1.8.0 (iOS)", forHTTPHeaderField: "User-Agent")
                   let (data, response) = try await URLSession.shared.data(for: request)
                   guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
                         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
@@ -1801,7 +2711,7 @@ jobs:
                       let requestHistory = settings.strictDocumentGrounding && attachment != nil
                           ? Array(budgetedHistory.filter { $0.role == .user }.suffix(4))
                           : budgetedHistory
-                      let maxOutputTokens = outputTokenLimit(for: provider, mode: settings.intelligenceMode)
+                      let maxOutputTokens = outputTokenLimit(for: provider, mode: settings.intelligenceMode, outputMode: outputMode)
                       attempted = true
                       let startedAt = Date()
                       do {
@@ -1811,7 +2721,7 @@ jobs:
                           } else {
                               text = try await openAIChat(history: requestHistory, prompt: effectivePrompt, attachment: attachment, provider: provider, key: key, model: requestModel, baseURL: baseURL, systemPrompt: systemPrompt, maxOutputTokens: maxOutputTokens)
                           }
-                          let cleaned = normalizedMarkdown(text)
+                          let cleaned = outputMode == .web ? normalizedWebProjectResponse(text) : normalizedMarkdown(text)
                           guard !cleaned.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                               throw ServiceError("The provider returned an empty response", kind: .provider)
                           }
@@ -1824,7 +2734,7 @@ jobs:
           
                           var finalText = cleaned
                           var reviewer: ProviderID?
-                          if selected == .auto, settings.claimVerification, settings.intelligenceMode == .deep || settings.intelligenceMode == .research {
+                          if outputMode != .web, selected == .auto, settings.claimVerification, (settings.intelligenceMode == .deep || settings.intelligenceMode == .research) {
                               if let grounding, let reviewed = await verifyEvidenceDraft(
                                   draft: cleaned,
                                   originalQuestion: prompt,
@@ -2061,7 +2971,15 @@ jobs:
                   return mode == .fast ? min(base, 10_000) : ((mode == .deep || mode == .research) ? Int(Double(base) * 1.2) : base)
               }
           
-              private func outputTokenLimit(for provider: ProviderID, mode: IntelligenceMode) -> Int {
+              private func outputTokenLimit(for provider: ProviderID, mode: IntelligenceMode, outputMode: OutputMode = .answer) -> Int {
+                  if outputMode == .web {
+                      switch provider {
+                      case .groq: return 3_072
+                      case .gemini: return 10_240
+                      case .cloudflare, .mistral, .zai, .openRouter, .siliconFlow, .custom: return 8_192
+                      case .auto: return 6_144
+                      }
+                  }
                   switch provider {
                   case .groq:
                       // Groq free accounts often enforce 8K tokens/minute. Reserving 4096 output tokens
@@ -2112,7 +3030,7 @@ jobs:
                   - Requested output: \(outputMode.instruction)
                   - Never expose chain-of-thought, hidden reasoning, scratch work, internal analysis, policy checks, constraint checks, prompt instructions, or self-evaluation. Output only the useful final answer and concise evidence.
                   - Adapt the structure to the task. For a short question use a direct paragraph; for a substantial answer use concise descriptive headings and a clear visual hierarchy.
-                  - Return clean GitHub-Flavored Markdown. Never wrap the entire answer in a Markdown code fence and never emit raw JSON unless requested.
+                  - Return clean GitHub-Flavored Markdown. Never wrap the entire answer in a Markdown code fence, except when the Web Project file-block protocol explicitly requires complete fenced files. Never emit raw JSON unless requested.
                   - Use bullets for options, numbered steps only when order matters, checklists for actionable plans, and tables only for genuine comparisons.
                   - Put code in fenced blocks with an accurate language tag. Keep code complete enough to use and explain only the non-obvious parts.
                   - For document analysis, cite visible page or section markers when available and distinguish extracted evidence from inference.
@@ -2432,6 +3350,41 @@ jobs:
                   guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
                         let encoded = UIImage(cgImage: thumbnail).jpegData(compressionQuality: 0.82) else { return data }
                   return encoded
+              }
+          
+              private func normalizedWebProjectResponse(_ text: String) -> String {
+                  var value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                  let hiddenPatterns = [
+                      #"(?is)<think\b[^>]*>.*?</think>"#,
+                      #"(?is)<analysis\b[^>]*>.*?</analysis>"#,
+                      #"(?is)<reasoning\b[^>]*>.*?</reasoning>"#,
+                      #"(?is)<scratchpad\b[^>]*>.*?</scratchpad>"#
+                  ]
+                  for pattern in hiddenPatterns { value = value.replacingOccurrences(of: pattern, with: "", options: .regularExpression) }
+                  let earlyPrefix = String(value.lowercased().prefix(600))
+                  let hasReasoningPreamble = earlyPrefix.contains("<think>") || earlyPrefix.contains("<analysis>") || earlyPrefix.contains("<reasoning>") ||
+                      earlyPrefix.contains("here's a thinking process") || earlyPrefix.contains("here is a thinking process") ||
+                      earlyPrefix.contains("analyze user input") || earlyPrefix.contains("internal analysis")
+                  if hasReasoningPreamble {
+                      let finalMarkers = ["## final answer", "final answer:", "final response:", "## الإجابة النهائية", "الإجابة النهائية:", "## الجواب النهائي", "الجواب النهائي:"]
+                      if let match = finalMarkers.compactMap({ marker -> String.Index? in value.range(of: marker, options: [.caseInsensitive, .diacriticInsensitive])?.lowerBound }).sorted().first {
+                          value = String(value[match...])
+                      } else { return "" }
+                  }
+                  value = value
+                      .replacingOccurrences(of: #"(?i)</?(think|analysis|reasoning|scratchpad)>"#, with: "", options: .regularExpression)
+                      .replacingOccurrences(of: #"(?im)^\s*(here'?s (a|the) thinking process|analyze user input|internal analysis|constraint check|check against constraints|matches non-negotiable contract|one refinement)\s*:.*$"#, with: "", options: .regularExpression)
+                  if let audit = value.range(of: #"(?im)^\s*(check against constraints|constraint check|internal self[- ]?check|self[- ]?evaluation)\s*:?.*$"#, options: .regularExpression) {
+                      value = String(value[..<audit.lowerBound])
+                  }
+                  value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                  if value.hasPrefix("```markdown\n"), value.hasSuffix("```") {
+                      value.removeFirst("```markdown\n".count); value.removeLast(3)
+                  } else if value.hasPrefix("```md\n"), value.hasSuffix("```") {
+                      value.removeFirst("```md\n".count); value.removeLast(3)
+                  }
+                  // Do not normalize blank lines inside generated source: JavaScript template literals and preformatted HTML can depend on exact whitespace.
+                  return value.trimmingCharacters(in: .whitespacesAndNewlines)
               }
           
               func normalizedMarkdown(_ text: String) -> String {
@@ -4205,6 +5158,7 @@ jobs:
               @StateObject private var usage = UsageLedger()
               @StateObject private var navigation = NavigationState()
               @StateObject private var knowledge = KnowledgeStore()
+              @StateObject private var webProjects = WebProjectStore()
               var body: some Scene {
                   WindowGroup {
                       RootView()
@@ -4214,6 +5168,7 @@ jobs:
                           .environmentObject(usage)
                           .environmentObject(navigation)
                           .environmentObject(knowledge)
+                          .environmentObject(webProjects)
                   }
               }
           }
@@ -4227,6 +5182,7 @@ jobs:
               var body: some View {
                   TabView(selection: $navigation.selectedTab) {
                       ChatView().tag(AppTab.chat).tabItem { Label("Chat", systemImage: AppTab.chat.icon) }
+                      WebPreviewView().tag(AppTab.web).tabItem { Label("Web", systemImage: AppTab.web.icon) }
                       FilesView().tag(AppTab.files).tabItem { Label("Files", systemImage: AppTab.files.icon) }
                       ImagesView().tag(AppTab.images).tabItem { Label("Images", systemImage: AppTab.images.icon) }
                       SettingsView().tag(AppTab.settings).tabItem { Label("Settings", systemImage: AppTab.settings.icon) }
@@ -4277,6 +5233,8 @@ jobs:
               @EnvironmentObject private var attachment: AttachmentStore
               @EnvironmentObject private var usage: UsageLedger
               @EnvironmentObject private var knowledge: KnowledgeStore
+              @EnvironmentObject private var webProjects: WebProjectStore
+              @EnvironmentObject private var navigation: NavigationState
               @StateObject private var voiceInput = VoiceInputController()
           
               @State private var input = ""
@@ -4293,7 +5251,8 @@ jobs:
                   "لخّص هذا الملف وحدد أهم القرارات",
                   "اكتب لي خطة عملية خطوة بخطوة",
                   "حلّل الصورة واشرح التفاصيل المهمة",
-                  "راجع هذا النص وحسّن أسلوبه باحتراف"
+                  "راجع هذا النص وحسّن أسلوبه باحتراف",
+                  "أنشئ صفحة ويب احترافية واعرضها في Web Preview"
               ]
           
               var body: some View {
@@ -4594,6 +5553,7 @@ jobs:
               }
           
               private var progressDescription: String {
+                  if OutputMode.resolved(selected: settings.outputMode, prompt: input) == .web { return "Generating, validating, and saving the website project…" }
                   if settings.intelligenceMode == .research { return "Searching live sources, grounding claims, and selecting the best available provider…" }
                   if settings.selectedProvider == .auto { return "\(settings.intelligenceMode.title) routing is choosing the best available provider…" }
                   return "Using \(settings.selectedProvider.shortTitle) • \(settings.intelligenceMode.title)…"
@@ -4619,7 +5579,7 @@ jobs:
                       return
                   }
           
-                  if currentAttachment == nil, let currencyIntent = CurrencyIntentDetector.detect(prompt) {
+                  if requestedOutput != .web, currentAttachment == nil, let currencyIntent = CurrencyIntentDetector.detect(prompt) {
                       input = ""
                       sendLiveCurrency(prompt: prompt, output: requestedOutput, intent: currencyIntent)
                       return
@@ -4684,6 +5644,14 @@ jobs:
                           var fileFormat: String?
                           var generatedURL: URL?
                           var exportFailure: String?
+                          var webProjectID: UUID?
+                          var webFailure: String?
+                          if requestedOutput == .web {
+                              do {
+                                  let project = try webProjects.create(from: result.text, title: prompt)
+                                  webProjectID = project.id
+                              } catch { webFailure = error.localizedDescription }
+                          }
                           if let format = requestedOutput.automaticExport {
                               do {
                                   let title = String(prompt.replacingOccurrences(of: "\n", with: " ").prefix(48))
@@ -4701,12 +5669,19 @@ jobs:
                               exportFormat: fileFormat,
                               sources: result.sources,
                               evidenceReport: result.evidenceReport,
-                              toolSummary: result.toolSummary
+                              toolSummary: result.toolSummary,
+                              webProjectID: webProjectID
                           ))
                           usage.record(result.provider)
                           if let reviewer = result.reviewer { usage.record(reviewer) }
                           if !settings.keepAttachment { attachment.current = nil }
                           if let generatedURL { pendingSharedFile = SharedFile(url: generatedURL) }
+                          if let webProjectID {
+                              webProjects.select(webProjectID)
+                              navigation.selectedTab = .web
+                              UINotificationFeedbackGenerator().notificationOccurred(.success)
+                          }
+                          if let webFailure { present("The website code was returned, but AI Hub could not save a runnable project: \(webFailure)") }
                           if let exportFailure { present("The answer was created, but file export failed: \(exportFailure)") }
                       } catch { present(error.localizedDescription) }
                   }
@@ -4798,6 +5773,8 @@ jobs:
           
           struct MessageBubble: View {
               let message: ChatMessage
+              @EnvironmentObject private var webProjects: WebProjectStore
+              @EnvironmentObject private var navigation: NavigationState
               @State private var copied = false
               @State private var showShare = false
               @State private var shareFileURL: URL?
@@ -4905,6 +5882,24 @@ jobs:
                                       }
                                   }
                               }
+                          }
+                          .padding(.horizontal, 14).padding(.vertical, 10)
+                      }
+          
+                      if let projectID = message.webProjectID, let project = webProjects.project(id: projectID) {
+                          Divider().opacity(0.55)
+                          HStack(spacing: 10) {
+                              Image(systemName: "safari.fill").foregroundStyle(.indigo)
+                              VStack(alignment: .leading, spacing: 2) {
+                                  Text("Saved website project").font(.caption.bold())
+                                  Text("\(project.files.count) file\(project.files.count == 1 ? "" : "s") • Local preview ready").font(.caption2).foregroundStyle(.secondary)
+                              }
+                              Spacer()
+                              Button {
+                                  webProjects.select(projectID)
+                                  navigation.selectedTab = .web
+                              } label: { Label("Preview", systemImage: "play.fill") }
+                              .buttonStyle(.borderedProminent).controlSize(.small)
                           }
                           .padding(.horizontal, 14).padding(.vertical, 10)
                       }
@@ -5603,6 +6598,7 @@ jobs:
               @State private var zaiKey = ""
               @State private var mistralKey = ""
               @State private var cloudflareKey = ""
+              @State private var cloudflarePagesKey = ""
               @State private var openRouterKey = ""
               @State private var siliconKey = ""
               @State private var customKey = ""
@@ -5611,6 +6607,7 @@ jobs:
               @State private var checks: [ProviderID: KeyCheckState] = [:]
               @State private var pollinationsCheck: KeyCheckState = .unknown
               @State private var tavilyCheck: KeyCheckState = .unknown
+              @State private var cloudflarePagesCheck: KeyCheckState = .unknown
               @State private var errorMessage = ""
               @State private var showError = false
               @State private var saved = false
@@ -5650,6 +6647,20 @@ jobs:
                               Stepper(value: $settings.cloudflareDailyLimit, in: 1...20000, step: 25) { Text("Local daily request cap: \(settings.cloudflareDailyLimit)") }
                               LabeledContent("Used today", value: "\(usage.byProvider[ProviderID.cloudflare.rawValue] ?? 0)")
                               HStack { KeyStatusBadge(state: state(.cloudflare)); Spacer(); Button("Test key") { test(.cloudflare, key: cloudflareKey) }.disabled(state(.cloudflare) == .checking) }
+                          }
+          
+                          Section("Cloudflare Pages — public website publishing") {
+                              SecureField("Dedicated Pages API token (optional)", text: $cloudflarePagesKey).textInputAutocapitalization(.never).autocorrectionDisabled().focused($settingsInputFocused)
+                              LabeledContent("Account ID", value: settings.cloudflareAccountID.isEmpty ? "Not configured" : settings.cloudflareAccountID)
+                              Text("Leave the dedicated token blank to reuse the saved Cloudflare Workers AI token. If that token lacks Pages access, create a token with Account → Cloudflare Pages → Edit and Account → Account Settings → Read.")
+                                  .font(.caption).foregroundStyle(.secondary)
+                              HStack {
+                                  KeyStatusBadge(state: cloudflarePagesCheck)
+                                  Spacer()
+                                  Button("Save & test Pages") { testCloudflarePages() }.disabled(cloudflarePagesCheck == .checking)
+                              }
+                              Link(destination: URL(string: "https://dash.cloudflare.com/?to=/:account/pages")!) { Label("Open Cloudflare Pages", systemImage: "arrow.up.right.square") }
+                              Text("Web projects always remain available in local Web Preview. Publishing is optional and returns a public pages.dev HTTPS link.").font(.caption).foregroundStyle(.secondary)
                           }
           
                           providerSection(provider: .openRouter, title: "OpenRouter Free", key: $openRouterKey, model: $settings.openRouterModel, limit: $settings.openRouterDailyLimit)
@@ -5747,8 +6758,9 @@ jobs:
                   .onChange(of: groqKey) { _ in checks[.groq] = .unknown }
                   .onChange(of: zaiKey) { _ in checks[.zai] = .unknown }
                   .onChange(of: mistralKey) { _ in checks[.mistral] = .unknown }
-                  .onChange(of: cloudflareKey) { _ in checks[.cloudflare] = .unknown }
-                  .onChange(of: settings.cloudflareAccountID) { _ in checks[.cloudflare] = .unknown }
+                  .onChange(of: cloudflareKey) { _ in checks[.cloudflare] = .unknown; cloudflarePagesCheck = .unknown }
+                  .onChange(of: cloudflarePagesKey) { _ in cloudflarePagesCheck = .unknown }
+                  .onChange(of: settings.cloudflareAccountID) { _ in checks[.cloudflare] = .unknown; cloudflarePagesCheck = .unknown }
                   .onChange(of: openRouterKey) { _ in checks[.openRouter] = .unknown }
                   .onChange(of: siliconKey) { _ in checks[.siliconFlow] = .unknown }
                   .onChange(of: customKey) { _ in checks[.custom] = .unknown }
@@ -5774,7 +6786,7 @@ jobs:
               private func state(_ provider: ProviderID) -> KeyCheckState { checks[provider] ?? .unknown }
               private func loadKeys() {
                   geminiKey = settings.key(for: .gemini); groqKey = settings.key(for: .groq); zaiKey = settings.key(for: .zai)
-                  mistralKey = settings.key(for: .mistral); cloudflareKey = settings.key(for: .cloudflare); openRouterKey = settings.key(for: .openRouter)
+                  mistralKey = settings.key(for: .mistral); cloudflareKey = settings.key(for: .cloudflare); cloudflarePagesKey = settings.cloudflarePagesToken; openRouterKey = settings.key(for: .openRouter)
                   siliconKey = settings.key(for: .siliconFlow); customKey = settings.key(for: .custom); pollinationsKey = settings.pollinationsKey
                   tavilyKey = settings.tavilyKey
               }
@@ -5782,7 +6794,17 @@ jobs:
                   try settings.setKey(geminiKey, for: .gemini); try settings.setKey(groqKey, for: .groq); try settings.setKey(zaiKey, for: .zai)
                   try settings.setKey(mistralKey, for: .mistral); try settings.setKey(cloudflareKey, for: .cloudflare); try settings.setKey(openRouterKey, for: .openRouter)
                   try settings.setKey(siliconKey, for: .siliconFlow); try settings.setKey(customKey, for: .custom); try settings.setPollinationsKey(pollinationsKey)
-                  try settings.setTavilyKey(tavilyKey)
+                  try settings.setTavilyKey(tavilyKey); try settings.setCloudflarePagesToken(cloudflarePagesKey)
+              }
+              private func testCloudflarePages() {
+                  do {
+                      try settings.setKey(cloudflareKey, for: .cloudflare)
+                      try settings.setCloudflarePagesToken(cloudflarePagesKey)
+                  } catch { present(error.localizedDescription); return }
+                  let dedicated = cloudflarePagesKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                  let token = dedicated.isEmpty ? cloudflareKey : dedicated
+                  cloudflarePagesCheck = .checking
+                  Task { cloudflarePagesCheck = await CloudflarePagesService.shared.testPermissions(accountID: settings.cloudflareAccountID, token: token) }
               }
               private func test(_ provider: ProviderID, key: String) {
                   do { try settings.setKey(key, for: provider) }
@@ -5811,12 +6833,18 @@ jobs:
                   for (provider, _) in providers { checks[provider] = .checking }
                   pollinationsCheck = KeyValidationService.shared.validatePollinationsFormat(key: pollinationsKey)
                   tavilyCheck = tavilyKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .missing : .checking
+                  let dedicatedPages = cloudflarePagesKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                  let pagesToken = dedicatedPages.isEmpty ? cloudflareKey.trimmingCharacters(in: .whitespacesAndNewlines) : dedicatedPages
+                  cloudflarePagesCheck = pagesToken.isEmpty || settings.cloudflareAccountID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .missing : .checking
                   Task {
                       for (provider, key) in providers {
                           checks[provider] = await KeyValidationService.shared.validate(provider: provider, key: key, settings: settings)
                       }
                       if !tavilyKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                           tavilyCheck = await TavilyResearchService.shared.validate(key: tavilyKey)
+                      }
+                      if !pagesToken.isEmpty, !settings.cloudflareAccountID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                          cloudflarePagesCheck = await CloudflarePagesService.shared.testPermissions(accountID: settings.cloudflareAccountID, token: pagesToken)
                       }
                       isTestingAll = false; saved = true
                       DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saved = false }
@@ -6015,7 +7043,7 @@ jobs:
         run: |
           mkdir -p GeneratedApp/artifacts
           cat > GeneratedApp/artifacts/INSTALL.txt <<'TXT'
-          AI Hub 1.7.1 (Build 10) • iOS 16.4+
+          AI Hub 1.8.0 (Build 11) • iOS 16.4+
 
           AIHub-unsigned.ipa must be signed before installation.
           AIHub-signed.ipa, when present, uses the development profile supplied in repository secrets.
@@ -6043,6 +7071,12 @@ jobs:
           - Hidden chain-of-thought, <think> blocks, reasoning_content, internal constraint checks, and provider self-audits are removed or rejected before display.
           - Version 1.7 adds persistent Knowledge Projects with multi-file local indexing and hybrid BM25 + semantic retrieval; relevant passages carry exact [K#] citations.
           - Version 1.7.1 makes Tavily free-plan compatible by using basic search and omitting the enterprise-only safe_search request field.
+          - Version 1.8 adds Web Project output: generated HTML is saved as a real persistent local project and opens immediately in a dedicated WKWebView Web Preview tab.
+          - Web Project supports both one-file index.html sites and complete multi-file HTML/CSS/JavaScript/JSON/SVG projects with strict file-block parsing, UTF-8/type/size/path validation, and index.html normalization.
+          - Web Preview includes project switching, refresh, source-file browsing, local HTML sharing, full ZIP export, project deletion, and remembered publication metadata.
+          - Optional Cloudflare Pages Direct Upload creates or reuses a Pages project, computes Wrangler-compatible BLAKE3 asset hashes, uploads assets, upserts hashes, deploys the manifest, and returns a public HTTPS pages.dev link.
+          - Cloudflare publishing reuses the saved Workers AI Account ID/token when possible, supports a dedicated Pages token, tests authorization, and identifies Account → Cloudflare Pages → Edit as the required permission.
+          - Local website creation and preview never require publishing; public publishing happens only when the user taps Publish.
           - Current/historical currency questions bypass the language model and use keyless Frankfurter structured rates with a second no-key fallback, deterministic conversion, data date, source link, and refusal to estimate on failure.
           - Web Research uses a user-supplied free Tavily key, freshness controls, official-source expansion, deduplication, clickable [S#] sources, and strict citation rejection.
           - Evidence cards show source excerpts and deterministic citation coverage; Auto Deep/Research can run independent claim-level correction through a second configured provider.
@@ -6050,7 +7084,7 @@ jobs:
           - Ambiguous report/plan/comparison requests can ask concise clarifying questions before spending an API call.
           - A deterministic local calculator supports explicit arithmetic, while spreadsheet/CSV attachments receive a local structural data profile.
           - Retrieved file/web content is quoted as untrusted data and suspicious embedded prompt instructions are marked instead of executed.
-          - Output can be selected before sending: Answer, Markdown Table, Excel, CSV, PDF, or Word; prompt keywords can also infer the requested type.
+          - Output can be selected before sending: Answer, Markdown Table, Excel, CSV, PDF, Word, or Web Project; prompt keywords can also infer the requested type.
           - Every assistant answer has an Export menu for XLSX, CSV, PDF, DOCX, TXT, and Markdown.
           - Professional XLSX exports support multiple sheets, Arabic RTL, styled headers, frozen first row, filters, numeric/percent cells, safe formulas, and useful widths.
           - PDF and DOCX exports preserve Arabic direction, headings, lists, code, and tables; generated files persist under Documents/AIHubExports and can be shared.
