@@ -109,7 +109,7 @@ jobs:
           # Keep the complete app source inside this one workflow, but gzip it because GitHub
           # ignores workflow files larger than 500 KB before creating a run.
           cat > GeneratedApp/AIHubApp.swift.gz.b64 <<'SWIFT_SOURCE_GZIP_BASE64'
-          H4sICGWShWoAA0FJSHViQXBwLnN3aWZ0AMw8XW8cR3Lv+hWtjXFY4pZD38VOAhqKQFGktGdS4nFJ
+          H4sICGuWhWoAA0FJSHViQXBwLnN3aWZ0AMw8XW8cR3Lv+hWtjXFY4pZD38VOAhqKQFGktGdS4nFJ
           He4swe6d6d3t43ysp2dIrn0G4sQ+G34OkB8QXOwE5xhOYhh+zp+gXvNLUlXdPdPdM0uZtgWcHsSZ
           /qiuqq7v7lmZLYuyYvtFnSe8kkV+S+qWyYWcVadj+3o6flNW9uVoUVSFajv1u33bLUpxUvJczUTJ
           p6loQORyVpTZyWopxonIKzmTomxmHd3fd1Z4IpWDi35zunGJccbnotMQ7Y73ZVqJ8l4Nf2TewKfe
@@ -2243,12 +2243,13 @@ jobs:
           +kojtKFlEGkOUkSiO5khWUc0KtnxvnCxgHEfoEz5LDnNDoCKzQZK05slOWbSSk+AHqomZzKNL/IQ
           OUWIEeqjgdY26l0aIIXH4XvmT+VweFyqdCClJsZxg4H4RRYzjDq0R0mAsrFWr7gxaYwRVKLwfnrA
           4eFS3bXarCB5ZOsKTdpoa8d44RNGYvFdtdCHIJpEN5Wna/r+Ka6fcEIDq0Yr7daHotcwEo5BSdfn
-          1hIxBp5NVS4sCpQTRYidLwsTWgJcgAJmK5tTOGFVvLbFxnBSDxKSinObTIridZUcYZr3K8mXShCH
-          W1gl0ywbZ+NQ+kT8nDNZmLGmFNRJ/ayjMFvRODebaJzWhKF/3ephLkEV+iGYdCuWmru5OU7Nqqtz
-          HpG2o1iOGGtFmdRTAu5wlyLkxICrxUH7MZ+baLscpiadzSZnhlhCT/3SuBqRIO5h/jbZh7vZy/Pm
-          CIeWgo1WdHL9jg9YTisWn02h3JxEXp1AFLElSUhqRqU0lT65mNL0g1Cc9h3/T4PcpGFCV7NZFhyn
-          gdDhUvbNYQbS+GXmmLtIYiQW5bCeznWP3CtjIEPbQitO6eJpIkoXFgVzUr3wcezAfmhisn8UJOz/
-          H1YK/LNFjAgA
+          1vrKCeSz7kXyMT8BdB7ORFWPkcUtx+102frk+kYgSZhTyUH+R2XmhpoyP5wK5MvChO52AyN2a2OA
+          djTdmlFxByS7FegkmRTF6yo5wuzzV5IvlXwQIatKplk2zsahrI7WGEjjhQge29+S1BEQBWSGtOwi
+          taQBdHrFY6Dof4Vii0k/2bgZrhW+FgUZeJK+/ZopQbioDjHU0FkfjZ+/EOZJ6uk5s7YZwE3RtdTP
+          OlK/FbF5s4nYbE2h+wdFD3MJ8tyPhaVbsewNmpvjHLm6Oid0aTuK5ajiViRiPUnmDncpilril8VB
+          +zGf++RcDneZzmaTM0M+pKd+aeylyNT3MH+b7AOR5CXcc6R0S8FGK4alfscHLDAXi882aW5yKK9O
+          IJzbkrQ8NaOQn3SOxtyyH4T0t4mtfxp0Pw0TuprNsuA4DYQO1JFvlzSQVkgzx+5IUoWxcJP1DId7
+          5F4ZAxnapnJxlgNPE7EcsCiYHOyFj2MH9kMTk/2j4CX+/2WIewnOjQgA
           SWIFT_SOURCE_GZIP_BASE64
           python3 - <<'PY_DECODE_SOURCE'
           import base64
