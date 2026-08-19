@@ -109,7 +109,7 @@ jobs:
           # Keep the complete app source inside this one workflow, but gzip it because GitHub
           # ignores workflow files larger than 500 KB before creating a run.
           cat > GeneratedApp/AIHubApp.swift.gz.b64 <<'SWIFT_SOURCE_GZIP_BASE64'
-          H4sICGuWhWoAA0FJSHViQXBwLnN3aWZ0AMw8XW8cR3Lv+hWtjXFY4pZD38VOAhqKQFGktGdS4nFJ
+          H4sICASYhWoAA0FJSHViQXBwLnN3aWZ0AMw8XW8cR3Lv+hWtjXFY4pZD38VOAhqKQFGktGdS4nFJ
           He4swe6d6d3t43ysp2dIrn0G4sQ+G34OkB8QXOwE5xhOYhh+zp+gXvNLUlXdPdPdM0uZtgWcHsSZ
           /qiuqq7v7lmZLYuyYvtFnSe8kkV+S+qWyYWcVadj+3o6flNW9uVoUVSFajv1u33bLUpxUvJczUTJ
           p6loQORyVpTZyWopxonIKzmTomxmHd3fd1Z4IpWDi35zunGJccbnotMQ7Y73ZVqJ8l4Nf2TewKfe
@@ -1407,7 +1407,7 @@ jobs:
           2Bhj+A8Tiu5tHcQcbuxqPjnb3X80dLPfyhYwQH1Krh80w8U0R9nXHj/1SsO0DwCE7shq+mrmB+7h
           lfU45K+sNqCfXkEpI1l7u3aDIhXgl4cPjeAXHNKaZM7w7rProtBnn8UL3dwShW7GW3p4T7T08H5N
           oQefiUIPAoVsIVtANEaOJnD+pqHFw4GuXVvnga5d3zKaByLFntDaDVnus3C5UO9iacX23eWRtNdU
-          2oLSV4lIOi3UB47AlDQGCSW09zVSYXxiybDpft3cDMrchRPwpRiAA7nyg/RNmk9QgNfNn+wlGzcG
+          2oLSV4lIOi3UB47AlDQGCSW09zVSYXxiybDpft3cDMrchRPwpRiAA7nyg/RNmk9QgNfNn+wl6zcH
           a/3kRy6FpaPVwMldqCx0nhR5TxWwVGZ+cIUruqlLympu7LFuOyL4rXE/UlN5BEhvdEa7behsBYT8
           JLxqzdATWCD73mmEFju43a5sWHkmylh3fnQ3xG6iPOpxn8xEVEYzRev9bA4I9lE6hXvmyMvN0dDS
           ospkzW3W2LCF6zJtACDkJ4sTXPcvSNn1UAZLAL5iAEff5pOUrl5FgR2oZ0brcliVVXtG6V8Ymp93
@@ -2249,7 +2249,7 @@ jobs:
           OlK/FbF5s4nYbE2h+wdFD3MJ8tyPhaVbsewNmpvjHLm6Oid0aTuK5ajiViRiPUnmDncpilril8VB
           +zGf++RcDneZzmaTM0M+pKd+aeylyNT3MH+b7AOR5CXcc6R0S8FGK4alfscHLDAXi882aW5yKK9O
           IJzbkrQ8NaOQn3SOxtyyH4T0t4mtfxp0Pw0TuprNsuA4DYQO1JFvlzSQVkgzx+5IUoWxcJP1DId7
-          5F4ZAxnapnJxlgNPE7EcsCiYHOyFj2MH9kMTk/2j4CX+/2WIewnOjQgA
+          5F4ZAxnapnJxlgNPE7EcsCiYHOyFj2MH9kMTk/2j4CX+/5+TfDvOjQgA
           SWIFT_SOURCE_GZIP_BASE64
           python3 - <<'PY_DECODE_SOURCE'
           import base64
