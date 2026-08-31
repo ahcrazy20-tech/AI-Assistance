@@ -269,3 +269,18 @@ To add a new provider:
 - **v2.2.0** – Live Modules, Continuous Updates, Intelligent Output
 - Previous: v2.1.0
 - Date: 2026-08-31
+
+## v2.2.1 - Live Modules Tab (2026-08-31)
+
+Added dedicated **Live Modules / الوحدات الحية** tab:
+
+- New `AppTab.live` enum case
+- `LiveModulesTabView`:
+  - Wraps `ProviderControlCenterView` with full live module controls
+  - Toolbar: Info button + Menu (Update All Models, Check All Health, Fetch Remote Config)
+  - Info sheet `LiveModulesInfoView` with usage guide
+- TabView order: Chat, Search, Web Preview, Knowledge, Images, **Live**, Settings
+- Icon: `dot.radiowaves.leftAndRight` for live/waveform feel
+- Build bumped to 16, version 2.2.1
+
+This satisfies request: "create live modules tab"

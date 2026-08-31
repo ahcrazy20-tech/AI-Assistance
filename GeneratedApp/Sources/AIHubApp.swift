@@ -667,7 +667,7 @@ enum KeychainStore {
 // MARK: - State
 
 enum AppTab: Int, CaseIterable, Identifiable, Hashable {
-    case chat, search, web, files, images, settings
+    case chat, search, web, files, images, live, settings
     var id: Int { rawValue }
     var title: String {
         switch self {
@@ -676,6 +676,7 @@ enum AppTab: Int, CaseIterable, Identifiable, Hashable {
         case .web: return "Web Preview / المعاينة"
         case .files: return "Knowledge / المعرفة"
         case .images: return "Images / الصور"
+        case .live: return "Live Modules / الوحدات الحية"
         case .settings: return "Settings / الإعدادات"
         }
     }
@@ -686,6 +687,7 @@ enum AppTab: Int, CaseIterable, Identifiable, Hashable {
         case .web: return "safari.fill"
         case .files: return "books.vertical.fill"
         case .images: return "photo.fill.on.rectangle.fill"
+        case .live: return "dot.radiowaves.leftAndRight"
         case .settings: return "gearshape.fill"
         }
     }
@@ -7296,6 +7298,7 @@ struct RootView: View {
             WebPreviewView().tag(AppTab.web).tabItem { Label("Web", systemImage: AppTab.web.icon) }
             FilesView().tag(AppTab.files).tabItem { Label("Files", systemImage: AppTab.files.icon) }
             ImagesView().tag(AppTab.images).tabItem { Label("Images", systemImage: AppTab.images.icon) }
+            LiveModulesTabView().tag(AppTab.live).tabItem { Label("Live", systemImage: AppTab.live.icon) }
             SettingsView().tag(AppTab.settings).tabItem { Label("Settings", systemImage: AppTab.settings.icon) }
         }
         .tint(.indigo)
@@ -9793,6 +9796,98 @@ struct ProviderControlCenterView: View {
     }
 }
 
+
+
+
+
+struct LiveModulesTabView: View {
+    @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var usage: UsageLedger
+    @EnvironmentObject private var modelCatalog: ProviderModelCatalogStore
+    @EnvironmentObject private var vercelCredits: VercelCreditStore
+    @EnvironmentObject private var sambaQuota: SambaNovaQuotaStore
+    @EnvironmentObject private var liveStore: ProviderLiveModuleStore
+    @EnvironmentObject private var remoteConfig: RemoteModelConfigService
+    @State private var showInfo = false
+    
+    var body: some View {
+        NavigationStack {
+            ProviderControlCenterView(settings: settings, usage: usage, catalog: modelCatalog, liveStore: liveStore, remoteConfig: remoteConfig, credits: vercelCredits, quota: sambaQuota)
+                .navigationTitle("Live Modules")
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button {
+                            showInfo = true
+                        } label: {
+                            Image(systemName: "info.circle")
+                        }
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Menu {
+                            Button {
+                                Task { await liveStore.refreshAllModels(settings: settings) }
+                            } label: { Label("Update All Models", systemImage: "arrow.down.circle") }
+                            Button {
+                                Task {
+                                    for provider in ProviderID.allCases where provider != .auto {
+                                        let key = settings.key(for: provider)
+                                        if !key.isEmpty {
+                                            await liveStore.checkHealth(provider: provider, key: key, settings: settings)
+                                        }
+                                    }
+                                }
+                            } label: { Label("Check All Health", systemImage: "heart.text.square") }
+                            Button {
+                                Task { await remoteConfig.fetch() }
+                            } label: { Label("Fetch Remote Config", systemImage: "arrow.triangle.2.circlepath") }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                    }
+                }
+                .sheet(isPresented: $showInfo) {
+                    LiveModulesInfoView()
+                }
+        }
+    }
+}
+
+struct LiveModulesInfoView: View {
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("What is Live Modules?") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("Real-time provider health monitoring", systemImage: "heart.fill").font(.subheadline)
+                        Label("Live model discovery for all 14 providers", systemImage: "list.bullet").font(.subheadline)
+                        Label("Continuous auto-refresh every 5-60 min", systemImage: "timer").font(.subheadline)
+                        Label("Enable/disable per provider for Auto routing", systemImage: "switch.2").font(.subheadline)
+                        Label("Remote model recommendations without app update", systemImage: "arrow.down.doc").font(.subheadline)
+                        Label("Intelligent output enhancement", systemImage: "sparkles").font(.subheadline)
+                    }
+                }
+                Section("How to Use") {
+                    Text("1. Enable Continuous Live Updates toggle").font(.caption)
+                    Text("2. Tap Update Models on any provider card to fetch latest models").font(.caption)
+                    Text("3. Tap Test to check health & latency").font(.caption)
+                    Text("4. Use model picker - shows live + recommended + catalog models").font(.caption)
+                    Text("5. Toggle Auto to include/exclude from background refresh").font(.caption)
+                    Text("6. In Smart Auto Routing, toggle per provider to control Auto mode").font(.caption)
+                    Text("7. Tap recommended model chips in Model Intelligence to apply instantly").font(.caption)
+                }
+                Section("Intelligent Output") {
+                    Text("Output is enhanced by OutputIntelligenceEngine: strips hidden reasoning, ensures clean Markdown, preserves citations, and adds expert reasoning boost.").font(.caption)
+                }
+                Section("Remote Config") {
+                    Text("remote_models.json is fetched from GitHub raw. Edit it and push to main to update all installed apps without new IPA.").font(.caption)
+                    Text("URL: https://raw.githubusercontent.com/ahcrazy20-tech/AI-Assistance/main/remote_models.json").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Live Modules Help")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
 
 
 
