@@ -4752,6 +4752,12 @@ final class AIService {
         systemPrompt: String
     ) async -> (text: String, reviewer: ProviderID)? {
         let hasVisual = attachment.hasVisualInput
+        let task: TaskKind = {
+            if settings.intelligenceMode == .research { return .research }
+            if attachment.mimeType.contains("spreadsheet") || attachment.mimeType == "text/csv" { return .data }
+            if hasVisual { return .vision }
+            return .document
+        }()
         let candidates = providerCandidates(hasVisual: hasVisual, isDocument: true, mode: .deep).filter { $0 != primary }
         let audit = """
         Act as the final evidence auditor for an answer about an attached document.
@@ -4820,14 +4826,15 @@ final class AIService {
     }
 
     private func providerCandidates(hasVisual: Bool, isDocument: Bool, mode: IntelligenceMode, outputMode: OutputMode = .answer) -> [ProviderID] {
-        // Respect live module enabled states
-        let liveEnabled: (ProviderID) -> Bool = { provider in
+        // UserDefaults is the persisted source of truth for live-module enablement and is safe to
+        // read from this nonisolated helper (ProviderLiveModuleStore.isEnabled is MainActor-only).
+        func liveEnabled(_ provider: ProviderID) -> Bool {
             if provider == .auto { return true }
-            return ProviderLiveModuleStore.shared.isEnabled(provider)
+            return (UserDefaults.standard.object(forKey: "providerEnabled_\(provider.rawValue)") as? Bool) ?? true
         }
         func filtered(_ list: [ProviderID]) -> [ProviderID] {
-            let f = list.filter(liveEnabled)
-            return f.isEmpty ? list : f
+            let enabled = list.filter(liveEnabled)
+            return enabled.isEmpty ? list : enabled
         }
         if outputMode == .web {
             // Web work prioritizes long-context coding models; the web-specific health score learns independently.
@@ -9898,6 +9905,8 @@ struct SettingsView: View {
     @EnvironmentObject private var modelCatalog: ProviderModelCatalogStore
     @EnvironmentObject private var sambaQuota: SambaNovaQuotaStore
     @EnvironmentObject private var mcpCatalog: MCPToolCatalogStore
+    @EnvironmentObject private var liveStore: ProviderLiveModuleStore
+    @EnvironmentObject private var remoteConfig: RemoteModelConfigService
     @ObservedObject private var router = ProviderPerformanceStore.shared
     @State private var geminiKey = ""
     @State private var groqKey = ""
