@@ -1533,9 +1533,9 @@ struct RemoteProviderConfig: Codable {
     func startTimer() {
         timer?.invalidate()
         guard autoRefreshEnabled else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(refreshIntervalMinutes * 60), repeats: true) { _ in
+        timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(refreshIntervalMinutes * 60), repeats: true) { [weak self] _ in
             Task { @MainActor in
-                await self.refreshAllHealth()
+                await self?.refreshAllHealth()
             }
         }
     }
@@ -1654,19 +1654,14 @@ struct RemoteProviderConfig: Codable {
         states[provider]?.lastChecked = Date()
     }
     
-    func refreshAllHealth(settings: AppSettings? = nil, appSettings: AppSettings? = nil) async {
-        // Overload to support call without settings via shared AppSettings if needed
-        guard let settings = settings ?? appSettings else { return }
+    func refreshAllHealth(settings: AppSettings? = nil) async {
+        guard let settings else { return }
         for provider in ProviderID.allCases where provider != .auto {
             let key = settings.key(for: provider)
             if key.isEmpty { continue }
             await checkHealth(provider: provider, key: key, settings: settings)
             try? await Task.sleep(nanoseconds: 300_000_000)
         }
-    }
-    
-    func refreshAllHealth() async {
-        // Called by timer - tries to get settings from UserDefaults keychain already; will be called with explicit settings from UI
     }
     
     func updateQuota(provider: ProviderID, used: Int, limit: Int) {
