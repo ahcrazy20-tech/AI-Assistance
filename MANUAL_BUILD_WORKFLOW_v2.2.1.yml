@@ -202,7 +202,7 @@ jobs:
             PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            clean build
+            clean build 2>&1 | tee build.log
           APP_PATH="DerivedData-Unsigned/Build/Products/Release-iphoneos/AIHub.app"
           test -d "$APP_PATH"
           rm -rf artifacts/Payload
@@ -210,6 +210,18 @@ jobs:
           cp -R "$APP_PATH" artifacts/Payload/AIHub.app
           (cd artifacts && zip -qry AIHub-unsigned.ipa Payload)
           rm -rf artifacts/Payload
+
+      - name: Surface build errors as annotations
+        if: failure()
+        shell: bash
+        working-directory: GeneratedApp
+        run: |
+          LOG="build.log"
+          [ -f "$LOG" ] || exit 0
+          grep -E "error: |fatal error: " "$LOG" | sed 's/^[[:space:]]*//' | sort -u | head -n 60 | while IFS= read -r line; do
+            printf '::error::%s\n' "${line:0:900}"
+          done
+          exit 0
 
       - name: Install optional signing certificate and profile
         if: env.HAS_SIGNING == 'true'
