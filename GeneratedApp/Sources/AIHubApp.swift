@@ -618,7 +618,26 @@ struct PickedImageData: Transferable {
 enum KeychainStore {
     private static let service = "com.personal.aihub.keys"
 
+    // In-memory mirror of Keychain values. SecItemCopyMatching is synchronous IPC to
+    // securityd (tens of milliseconds per call) and SwiftUI views call read() on every
+    // body evaluation, so uncached reads froze the Live tab. Every write goes through
+    // write(_:account:), which keeps this mirror coherent. A lock makes the cache safe
+    // for the background tasks that also resolve keys.
+    private static let cacheLock = NSLock()
+    private static var valueCache: [String: String] = [:]
+
+    private static func cached(_ account: String) -> String? {
+        cacheLock.lock(); defer { cacheLock.unlock() }
+        return valueCache[account]
+    }
+
+    private static func storeCached(_ value: String, account: String) {
+        cacheLock.lock(); defer { cacheLock.unlock() }
+        valueCache[account] = value
+    }
+
     static func read(_ account: String) -> String {
+        if let hit = cached(account) { return hit }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -627,10 +646,19 @@ enum KeychainStore {
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data,
-              let value = String(data: data, encoding: .utf8) else { return "" }
-        return value
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        if status == errSecSuccess, let data = item as? Data,
+           let value = String(data: data, encoding: .utf8) {
+            storeCached(value, account: account)
+            return value
+        }
+        if status == errSecItemNotFound {
+            // Definitive "no key stored" — remember it so unconfigured providers stop
+            // paying the Keychain round-trip on every render. Transient securityd
+            // failures (locked/unavailable) are never cached.
+            storeCached("", account: account)
+        }
+        return ""
     }
 
     static func write(_ value: String, account: String) throws {
@@ -644,6 +672,7 @@ enum KeychainStore {
             guard status == errSecSuccess || status == errSecItemNotFound else {
                 throw ServiceError("Could not delete key (Keychain \(status))", kind: .configuration)
             }
+            storeCached("", account: account)
             return
         }
 
@@ -661,6 +690,7 @@ enum KeychainStore {
         } else if updateStatus != errSecSuccess {
             throw ServiceError("Could not update key (Keychain \(updateStatus))", kind: .configuration)
         }
+        storeCached(value, account: account)
     }
 }
 
@@ -1543,6 +1573,7 @@ struct RemoteProviderConfig: Codable {
     func setEnabled(_ enabled: Bool, for provider: ProviderID) {
         states[provider]?.isEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: "providerEnabled_\(provider.rawValue)")
+        Haptics.toggle()
     }
     func setAutoUpdate(_ enabled: Bool, for provider: ProviderID) {
         states[provider]?.autoUpdate = enabled
@@ -3531,25 +3562,37 @@ struct PublishWebsiteSheet: View {
     private let defaults = UserDefaults.standard
     private let dayKey = "usageDay"
     private let countsKey = "usageCounts"
-
-    init() { refresh() }
-    private var today: String {
+    // DateFormatter construction is expensive; the old code built one on every
+    // refresh() call and views call count(for:) on each body evaluation.
+    private static let dayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = .current
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: Date())
+        return formatter
+    }()
+    // Tracks the day already decoded this session so refresh() stops re-decoding
+    // UserDefaults JSON on every render. record(_:) mutates and persists the same
+    // state, so the in-memory dictionary stays authoritative between renders.
+    private var loadedForDay: String?
+
+    init() { refresh() }
+    private var today: String {
+        Self.dayFormatter.string(from: Date())
     }
     func refresh() {
-        if defaults.string(forKey: dayKey) != today {
-            defaults.set(today, forKey: dayKey)
+        let day = today
+        if defaults.string(forKey: dayKey) != day {
+            defaults.set(day, forKey: dayKey)
             defaults.removeObject(forKey: countsKey)
         }
+        guard loadedForDay != day else { return }
         if let data = defaults.data(forKey: countsKey),
            let decoded = try? JSONDecoder().decode([String: Int].self, from: data) {
             byProvider = decoded
         } else { byProvider = [:] }
         total = byProvider.values.reduce(0, +)
+        loadedForDay = day
     }
     func count(for provider: ProviderID) -> Int { refresh(); return byProvider[provider.rawValue, default: 0] }
     func count(label: String) -> Int { refresh(); return byProvider[label, default: 0] }
@@ -7291,6 +7334,22 @@ enum KeyboardController {
     static func dismiss() { UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
 }
 
+/// Centralized haptic feedback so key interactions feel as responsive as top App Store apps.
+@MainActor enum Haptics {
+    static func tap() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+    static func success() {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+    static func failure() {
+        UINotificationFeedbackGenerator().notificationOccurred(.error)
+    }
+    static func toggle() {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+}
+
 struct RootView: View {
     @EnvironmentObject private var navigation: NavigationState
     var body: some View {
@@ -8190,6 +8249,7 @@ struct ChatView: View {
         if voiceInput.isRecording { voiceInput.stop() }
         let prompt = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { return }
+        Haptics.tap()
         let conversationID = chat.selectedConversationID ?? chat.newConversation()
         let requestedOutput = OutputMode.resolved(selected: settings.outputMode, prompt: prompt)
         let currentAttachment = attachment.current
@@ -9795,6 +9855,10 @@ struct ProviderControlCenterView: View {
             }
         }
         isRefreshingAll = false
+        let anyOffline = ProviderID.allCases.contains { provider in
+            provider != .auto && liveStore.state(for: provider).status == .offline
+        }
+        if anyOffline { Haptics.failure() } else { Haptics.success() }
     }
 }
 
