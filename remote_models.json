@@ -1,0 +1,71 @@
+{
+  "version": "2.2",
+  "updatedAt": "2026-08-31",
+  "providers": {
+    "gemini": {
+      "recommendedModels": ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite", "gemini-2.5-flash"],
+      "defaultModel": "gemini-2.0-flash",
+      "notes": "Use gemini-2.0-flash for best balance. 1.5-pro for deep reasoning."
+    },
+    "groq": {
+      "recommendedModels": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b", "qwen/qwen3-32b", "meta-llama/llama-4-maverick-17b-128e-instruct", "moonshotai/kimi-k2-instruct-0905"],
+      "defaultModel": "llama-3.3-70b-versatile",
+      "notes": "Groq is ultra-fast. Use 70b for quality, 8b-instant for speed."
+    },
+    "zai": {
+      "recommendedModels": ["glm-4-flash", "glm-4-air", "glm-4-plus", "glm-4v-flash", "glm-4.6v-flash"],
+      "defaultModel": "glm-4-flash",
+      "notes": "Z.AI free tier GLM models"
+    },
+    "mistral": {
+      "recommendedModels": ["mistral-large-latest", "mistral-small-latest", "pixtral-large-latest", "codestral-latest", "mistral-small-3.1-24b-instruct"],
+      "defaultModel": "mistral-large-latest",
+      "notes": "Mistral free mode"
+    },
+    "cloudflare": {
+      "recommendedModels": ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/meta/llama-4-scout-17b-16e-instruct", "@cf/mistralai/mistral-small-3.1-24b-instruct", "@cf/openai/gpt-oss-120b", "@cf/google/gemma-3-12b-it", "@cf/qwen/qwq-32b"],
+      "defaultModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      "notes": "Cloudflare Workers AI free daily allocation"
+    },
+    "vercel": {
+      "recommendedModels": ["anthropic/claude-3.5-sonnet", "openai/gpt-4o-mini", "google/gemini-2.0-flash", "meta/llama-3.3-70b", "deepseek/deepseek-r1", "xai/grok-3"],
+      "defaultModel": "anthropic/claude-3.5-sonnet",
+      "notes": "Vercel AI Gateway $5/month free"
+    },
+    "sambaNova": {
+      "recommendedModels": ["Meta-Llama-3.3-70B-Instruct", "DeepSeek-R1", "Qwen3-32B", "Llama-4-Maverick-17B-128E-Instruct", "DeepSeek-V3.1"],
+      "defaultModel": "Meta-Llama-3.3-70B-Instruct",
+      "notes": "SambaNova fast free tier"
+    },
+    "openRouter": {
+      "recommendedModels": ["meta-llama/llama-3.3-70b-instruct:free", "google/gemini-2.0-flash-exp:free", "qwen/qwen-2.5-72b-instruct:free", "mistralai/mistral-7b-instruct:free", "openrouter/free"],
+      "defaultModel": "meta-llama/llama-3.3-70b-instruct:free",
+      "notes": "OpenRouter free models"
+    },
+    "siliconFlow": {
+      "recommendedModels": ["Qwen/Qwen3-8B", "deepseek-ai/DeepSeek-V3", "meta-llama/Meta-Llama-3.1-70B-Instruct", "Qwen/Qwen3-32B"],
+      "defaultModel": "Qwen/Qwen3-8B",
+      "notes": "SiliconFlow cheap inference"
+    },
+    "cerebras": {
+      "recommendedModels": ["llama-3.3-70b", "llama3.1-8b", "qwen-3-32b", "llama-3.1-70b"],
+      "defaultModel": "llama-3.3-70b",
+      "notes": "Cerebras 1M tokens/day free, ultra-fast"
+    },
+    "deepseek": {
+      "recommendedModels": ["deepseek-chat", "deepseek-reasoner", "deepseek-coder", "deepseek-v3"],
+      "defaultModel": "deepseek-chat",
+      "notes": "DeepSeek cheap and powerful"
+    },
+    "nvidiaNIM": {
+      "recommendedModels": ["meta/llama-3.1-70b-instruct", "meta/llama-3.1-405b-instruct", "nvidia/llama-3.1-nemotron-70b-instruct", "mistralai/mixtral-8x22b-instruct"],
+      "defaultModel": "meta/llama-3.1-70b-instruct",
+      "notes": "NVIDIA NIM 100+ models"
+    },
+    "antigravity": {
+      "recommendedModels": ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "gpt-4o", "gemini-2.0-flash"],
+      "defaultModel": "claude-3-5-sonnet-20241022",
+      "notes": "Antigravity agent coding"
+    }
+  }
+}
