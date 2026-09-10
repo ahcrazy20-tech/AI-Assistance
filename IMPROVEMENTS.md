@@ -284,3 +284,72 @@ Added dedicated **Live Modules / الوحدات الحية** tab:
 - Build bumped to 16, version 2.2.1
 
 This satisfies request: "create live modules tab"
+
+---
+
+# v3.0 — 2026-09-10 — "the whole app is dead"
+
+## What was actually wrong
+
+Not a crash. Every hardcoded model ID had been retired upstream, so each request
+404'd. Verified against provider deprecation tables on 2026-09-10:
+
+| Provider | Default in the app | Reality |
+|---|---|---|
+| Groq | `llama-3.3-70b-versatile` | **shut down 2026-08-16**; replacement `qwen/qwen3.6-27b` |
+| DeepSeek | `deepseek-chat` | **retired 2026-07-24 15:59 UTC**; only `deepseek-v4-flash`/`-pro` answer |
+| Z.AI | `glm-4-flash`, `glm-4v-flash` | retired; free tier is now `glm-4.7-flash`, `glm-4.5-flash`, `glm-4.6v-flash` |
+| Cerebras | `llama-3.3-70b` | removed from the catalog, **and** the no-card free tier ended Aug 2026 |
+| NVIDIA NIM | `meta/llama-3.1-70b-instruct` | 3.1 line aging out; `meta/llama-3.3-70b-instruct` is the $0 workhorse |
+| Vercel | `anthropic/claude-3.5-sonnet` | not a gateway ID any more; `anthropic/claude-sonnet-4.5` |
+| Antigravity | `claude-3-5-sonnet-20241022` | never worked — Claude IDs POSTed to the Gemini endpoint |
+
+The same dead IDs lived in **three** places: `remote_models.json`,
+`ProviderID.defaultModel`, and `RemoteModelConfigService.fallbackJSON`. The third
+is the offline path, so a dead model could not even be corrected when the network
+was bad.
+
+## Two claims in the v2.2 report above were wrong
+
+- "`gemini-3.7-flash` does not exist → API 404" — it does exist and is on the free
+  tier. Gemini 3.5/3.6/3.7/3.8 Flash are all free as of 2026-09-10.
+- "`glm-4.7-flash` (Z.AI) is a fake ID" — it is real and is one of only three
+  genuinely free Z.AI models.
+
+v2.2 "fixed" both by downgrading to older IDs, which is what made them rot again.
+
+## What v3.0 does
+
+1. **`remote_models.json` v3.0** — every ID re-verified 2026-09-10. Adds
+   `fallbackChain`, `retiredModels` (per-provider), and `free` / `requiresCard` /
+   `status` / `contextTokens` metadata, plus a top-level `deprecated` map.
+2. **APInex added** (`https://api.apinex.bond/v1`) — OpenAI-compatible, 8 free
+   models at 1M context each: `free/gemini-3.8-flash`, `free/qwen-3.8-max`,
+   `free/glm-5.3-flash`, `free/gpt-5.6-luna`, `free/deepseek-v4-flash-0731`,
+   `free/gemini-3.1-pro`, `free/deepseek-v4-pro-0813`, `free/muse-spark-1.3`.
+3. **Antigravity retired** — `ProviderID.isRetired` drops it from Auto routing at
+   the `filtered(...)` helper, so retiring a provider later is a one-line change.
+4. **`ModelCatalog` self-healing** — the structural fix. A retired ID is rewritten
+   to its replacement before the request; a model-not-found response walks to the
+   next entry in the chain. Applied to both the Gemini and OpenAI transports.
+   Lock-guarded so nonisolated request code can read it without an actor hop.
+5. **No more drift** — `fallbackJSON` and `ModelCatalogDefaults` are generated
+   from `remote_models.json` by `tools/sync_fallback_json.py`.
+6. **`tools/validate_catalog.py`** — gated in CI before the macOS build. Catches
+   dead IDs in all three copies, catalog/default drift, and hand-edited generated
+   blocks. It reported 67 real failures on first run.
+7. **Pollinations** — `gen.pollinations.ai/v1/images/*` now requires a key, so
+   image generation fell over for anyone without one. Added a fallback to the
+   still-anonymous `image.pollinations.ai/prompt/{prompt}` endpoint.
+8. **Key validation** — a gateway with no `/models` endpoint returned 404 and was
+   reported as an invalid key, telling users to replace working credentials.
+   404/405 on a models probe is now treated as accepted.
+9. **DeepSeek base URL** — `https://api.deepseek.com` → `.../v1`, matching the
+   verified `/v1/chat/completions` and `/v1/models` paths.
+10. Daily limits re-derived from the current free-tier tables (Gemini 1,000,
+    APInex 500, Cerebras 200).
+
+Version 3.0.0, build 17.
+
+See **FREE_MODULES.md** for the full verified free-module list, including strong
+free providers not yet wired (GitHub Models, Cohere, HuggingFace, Scaleway).
