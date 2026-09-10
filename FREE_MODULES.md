@@ -24,7 +24,10 @@ or a live catalog on **2026-09-10**. "Wired" means the app already has it as a
 | **SambaNova Cloud** | `https://api.sambanova.ai/v1` | `Meta-Llama-3.3-70B-Instruct`, `gpt-oss-120b`, `DeepSeek-V3.2`, `DeepSeek-V3.1`, `gemma-4-31B-it`, `MiniMax-M2.7` | ~200K tokens/day per model | docs |
 | **Mistral La Plateforme** | `https://api.mistral.ai/v1` | `mistral-small-latest`, `mistral-medium-2508`, `devstral-small`, `magistral-small`, `codestral-latest`, `mistral-large-latest` | free "Experiment" tier ~1B tok/month but ~1 req/sec — phone verification | docs |
 | **NVIDIA NIM** | `https://integrate.api.nvidia.com/v1` | `meta/llama-3.3-70b-instruct`, `nvidia/nemotron-3-super-120b-a12b`, `deepseek-ai/deepseek-r1`, `moonshotai/kimi-k2-instruct` | 1,000 free credits, ~40 RPM | agg |
+| **GitHub Models** ⭐ new | `https://models.inference.ai.azure.com` | `gpt-4.1` (1M ctx), `gpt-4.1-mini` (1M), `gpt-4o`, `Meta-Llama-3.3-70B`, `Mistral-Small-3.1`, `DeepSeek-R1`, `Llama-4-Scout-17B-16E`, `o3-mini`, `o4-mini`, `Phi-4` | 10–15 RPM, 50–150 RPD; **permanently free, no card**, authenticates with any GitHub token | docs |
 | **SiliconFlow** | `https://api.siliconflow.com/v1` | `Qwen/Qwen3-8B`, `Qwen/Qwen2.5-7B-Instruct`, `meta-llama/Meta-Llama-3.1-8B-Instruct` | small checkpoints are the reliably free ones | agg |
+
+**Note on the o-series on GitHub Models:** `o3-mini` and `o4-mini` are offered in the model picker but are deliberately kept out of the automatic fallback chain — they take different request parameters than the plain chat-completions path.
 
 ## Tier 2 — wired, but not actually free
 
@@ -41,7 +44,6 @@ Found while searching; each needs an in-app check before it is trusted.
 
 | Module | Why it is interesting | Free allowance | Conf |
 |---|---|---|---|
-| **GitHub Models** | GPT-4o / GPT-4.1 / o3 / Grok-3 class models on a GitHub token you may already have | 50–150 req/day, 10–15 RPM | agg |
 | **Cohere** | Command R+ and Embed 4; good for the Knowledge/RAG tab | 1,000 calls/month (non-commercial) | agg |
 | **HuggingFace Inference** | 300+ community models, one key | small monthly credits | agg |
 | **xAI** | Grok 4 / Grok 4.1 Fast | $25 signup credit, not a standing tier | agg |
@@ -54,6 +56,7 @@ Found while searching; each needs an in-app check before it is trusted.
 
 ## What changed in the app to go with this list
 
+0. **Two new free gateways wired in**: APInex and GitHub Models.
 1. **`remote_models.json` v3.0** — the runtime catalog. Installed apps fetch it
    from GitHub raw, so pushing it to `main` repairs existing installs with no new
    IPA. It now carries `fallbackChain`, `retiredModels`, and `free`/`requiresCard`/

@@ -353,3 +353,23 @@ Version 3.0.0, build 17.
 
 See **FREE_MODULES.md** for the full verified free-module list, including strong
 free providers not yet wired (GitHub Models, Cohere, HuggingFace, Scaleway).
+
+## v3.0 addendum — GitHub Models wired
+
+Added as a first-class provider after APInex. Permanently free, no card,
+OpenAI-compatible at `https://models.inference.ai.azure.com`, and it
+authenticates with an ordinary GitHub token — most people already have one.
+
+Free catalogue verified 2026-09-10: `gpt-4.1` and `gpt-4.1-mini` (1M context),
+`gpt-4o`, `Meta-Llama-3.3-70B`, `Mistral-Small-3.1`, `DeepSeek-R1`,
+`Llama-4-Scout-17B-16E`, `o3-mini`, `o4-mini`, `Phi-4`. 10–15 RPM,
+50–150 RPD depending on model.
+
+The o-series is offered in the picker but kept out of the automatic fallback
+chain, because those models take different request parameters.
+
+This also corrected an over-broad deprecation: `gpt-4o` had been condemned
+globally, but it is a live model ID on GitHub Models. It is now scoped to Vercel,
+where the bare alias really is dead.
+
+Both additions were verified by the real Xcode 26 build on the pull request.
