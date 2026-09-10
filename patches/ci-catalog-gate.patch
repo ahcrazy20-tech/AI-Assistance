@@ -1,0 +1,42 @@
+diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
+index f0029ba..8f8732b 100644
+--- a/.github/workflows/build.yml
++++ b/.github/workflows/build.yml
+@@ -30,8 +30,26 @@ env:
+   HAS_SIGNING: ${{ secrets.BUILD_CERTIFICATE_BASE64 != '' && secrets.BUILD_PROVISION_PROFILE_BASE64 != '' }}
+ 
+ jobs:
++  catalog:
++    name: Validate model catalog
++    runs-on: ubuntu-latest
++    timeout-minutes: 5
++    steps:
++      - name: Checkout
++        uses: actions/checkout@v4
++
++      - name: Check catalog consistency and dead model IDs
++        shell: bash
++        run: |
++          set -euo pipefail
++          python3 tools/validate_catalog.py
++          # --check is already invoked by the validator; run it again so the
++          # failure is obvious in the log when someone hand-edits the copies.
++          python3 tools/sync_fallback_json.py --check
++
+   build-ios:
+     name: Build with Xcode 26 • iOS 16.4+
++    needs: catalog
+     runs-on: macos-26
+     timeout-minutes: 45
+ 
+@@ -85,8 +103,8 @@ jobs:
+               SWIFT_VERSION: "5.0"
+               SWIFT_STRICT_CONCURRENCY: minimal
+               IPHONEOS_DEPLOYMENT_TARGET: 16.4
+-              CURRENT_PROJECT_VERSION: 16
+-              MARKETING_VERSION: 2.2.1
++              CURRENT_PROJECT_VERSION: 17
++              MARKETING_VERSION: 3.0.0
+               CODE_SIGN_STYLE: Automatic
+           targets:
+             AIHub:

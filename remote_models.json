@@ -1,71 +1,451 @@
 {
-  "version": "2.2",
-  "updatedAt": "2026-08-31",
+  "version": "3.0",
+  "updatedAt": "2026-09-10",
+  "notes": "Every model ID below was re-verified against provider docs / deprecation tables on 2026-09-10. Apps fetch this file at runtime, so pushing it to main repairs already-installed builds without a new IPA.",
   "providers": {
+    "apinex": {
+      "recommendedModels": [
+        "free/gemini-3.8-flash",
+        "free/gemini-3.1-pro",
+        "free/qwen-3.8-max",
+        "free/glm-5.3-flash",
+        "free/gpt-5.6-luna",
+        "free/deepseek-v4-flash-0731",
+        "free/deepseek-v4-pro-0813",
+        "free/muse-spark-1.3"
+      ],
+      "defaultModel": "free/gemini-3.8-flash",
+      "fallbackChain": [
+        "free/gemini-3.8-flash",
+        "free/qwen-3.8-max",
+        "free/glm-5.3-flash",
+        "free/deepseek-v4-flash-0731",
+        "free/gpt-5.6-luna",
+        "free/gemini-3.1-pro",
+        "free/deepseek-v4-pro-0813",
+        "free/muse-spark-1.3"
+      ],
+      "free": true,
+      "requiresCard": false,
+      "status": "online",
+      "contextTokens": 1000000,
+      "vision": false,
+      "baseURL": "https://api.apinex.bond/v1",
+      "modelsEndpoint": "https://apinex.bond/api/public/models",
+      "signupURL": "https://apinex.bond/register",
+      "notes": "NEW in v3.0. OpenAI-compatible gateway, one key, 1M context on every free model. free/* models cost nothing. Live catalog: https://apinex.bond/api/public/models"
+    },
     "gemini": {
-      "recommendedModels": ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite", "gemini-2.5-flash"],
-      "defaultModel": "gemini-2.0-flash",
-      "notes": "Use gemini-2.0-flash for best balance. 1.5-pro for deep reasoning."
+      "recommendedModels": [
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite"
+      ],
+      "defaultModel": "gemini-3.8-flash",
+      "fallbackChain": [
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite"
+      ],
+      "free": true,
+      "requiresCard": false,
+      "status": "online",
+      "contextTokens": 1000000,
+      "vision": true,
+      "modelsEndpoint": "https://generativelanguage.googleapis.com/v1beta/models",
+      "signupURL": "https://aistudio.google.com/apikey",
+      "notes": "Flash family is the free tier (10-15 RPM, ~1500 RPD); Pro models moved behind billing. 3.8 -> 2.5 all answer on a free key. Native vision + PDF + 1M context."
     },
     "groq": {
-      "recommendedModels": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b", "qwen/qwen3-32b", "meta-llama/llama-4-maverick-17b-128e-instruct", "moonshotai/kimi-k2-instruct-0905"],
-      "defaultModel": "llama-3.3-70b-versatile",
-      "notes": "Groq is ultra-fast. Use 70b for quality, 8b-instant for speed."
+      "recommendedModels": [
+        "qwen/qwen3.6-27b",
+        "openai/gpt-oss-120b",
+        "minimaxai/minimax-m2.7",
+        "moonshotai/kimi-k2-instruct",
+        "openai/gpt-oss-20b",
+        "openai/gpt-oss-safeguard-20b",
+        "groq/compound",
+        "groq/compound-mini"
+      ],
+      "defaultModel": "qwen/qwen3.6-27b",
+      "fallbackChain": [
+        "qwen/qwen3.6-27b",
+        "openai/gpt-oss-120b",
+        "minimaxai/minimax-m2.7",
+        "openai/gpt-oss-20b",
+        "moonshotai/kimi-k2-instruct",
+        "groq/compound"
+      ],
+      "free": true,
+      "requiresCard": false,
+      "status": "online",
+      "contextTokens": 131072,
+      "vision": false,
+      "modelsEndpoint": "https://api.groq.com/openai/v1/models",
+      "signupURL": "https://console.groq.com/keys",
+      "notes": "llama-3.3-70b-versatile and llama-3.1-8b-instant were shut down 2026-08-16. Groq's own recommended replacements are qwen/qwen3.6-27b and openai/gpt-oss-120b.",
+      "retiredModels": {
+        "llama-3.3-70b-versatile": "qwen/qwen3.6-27b",
+        "llama-3.1-8b-instant": "openai/gpt-oss-20b",
+        "qwen/qwen3-32b": "openai/gpt-oss-120b",
+        "meta-llama/llama-4-scout-17b-16e-instruct": "openai/gpt-oss-120b",
+        "meta-llama/llama-4-maverick-17b-128e-instruct": "openai/gpt-oss-120b",
+        "allam-2-7b-instruct": "qwen/qwen3.6-27b",
+        "meta-llama/llama-guard-4-12b": "openai/gpt-oss-safeguard-20b"
+      }
     },
     "zai": {
-      "recommendedModels": ["glm-4-flash", "glm-4-air", "glm-4-plus", "glm-4v-flash", "glm-4.6v-flash"],
-      "defaultModel": "glm-4-flash",
-      "notes": "Z.AI free tier GLM models"
+      "recommendedModels": [
+        "glm-4.7-flash",
+        "glm-4.5-flash",
+        "glm-4.7",
+        "glm-4.6",
+        "glm-4.5-air",
+        "glm-4.5"
+      ],
+      "defaultModel": "glm-4.7-flash",
+      "fallbackChain": [
+        "glm-4.7-flash",
+        "glm-4.5-flash",
+        "glm-4.7",
+        "glm-4.6",
+        "glm-4.5-air"
+      ],
+      "free": true,
+      "requiresCard": false,
+      "status": "online",
+      "contextTokens": 203000,
+      "vision": false,
+      "visionModel": "glm-4.6v-flash",
+      "modelsEndpoint": "https://api.z.ai/api/paas/v4/models",
+      "signupURL": "https://z.ai/manage-apikey/apikey-list",
+      "notes": "Only glm-4.7-flash, glm-4.5-flash and glm-4.6v-flash are $0. Everything else bills. glm-4-flash / glm-4v-flash no longer resolve."
     },
     "mistral": {
-      "recommendedModels": ["mistral-large-latest", "mistral-small-latest", "pixtral-large-latest", "codestral-latest", "mistral-small-3.1-24b-instruct"],
-      "defaultModel": "mistral-large-latest",
-      "notes": "Mistral free mode"
+      "recommendedModels": [
+        "mistral-small-latest",
+        "mistral-medium-2508",
+        "devstral-small",
+        "magistral-small",
+        "codestral-latest",
+        "mistral-large-latest",
+        "pixtral-large-latest",
+        "open-mistral-nemo",
+        "mistral-small-3.2-24b-instruct"
+      ],
+      "defaultModel": "mistral-small-latest",
+      "fallbackChain": [
+        "mistral-small-latest",
+        "mistral-medium-2508",
+        "devstral-small",
+        "open-mistral-nemo",
+        "codestral-latest",
+        "mistral-large-latest"
+      ],
+      "free": true,
+      "requiresCard": false,
+      "status": "online",
+      "contextTokens": 256000,
+      "vision": true,
+      "modelsEndpoint": "https://api.mistral.ai/v1/models",
+      "signupURL": "https://console.mistral.ai/api-keys",
+      "notes": "Free Experiment tier is ~1B tokens/month but roughly 1 request/second. mistral-small-latest is the right default; mistral-large-latest burns the rate limit fast."
     },
     "cloudflare": {
-      "recommendedModels": ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/meta/llama-4-scout-17b-16e-instruct", "@cf/mistralai/mistral-small-3.1-24b-instruct", "@cf/openai/gpt-oss-120b", "@cf/google/gemma-3-12b-it", "@cf/qwen/qwq-32b"],
-      "defaultModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-      "notes": "Cloudflare Workers AI free daily allocation"
+      "recommendedModels": [
+        "@cf/zai-org/glm-4.7-flash",
+        "@cf/openai/gpt-oss-120b",
+        "@cf/meta/llama-4-scout-17b-16e-instruct",
+        "@cf/google/gemma-4-26b-a4b-it",
+        "@cf/qwen/qwen3-30b-a3b-fp8",
+        "@cf/nvidia/nemotron-3-120b-a12b",
+        "@cf/moonshotai/kimi-k2.6",
+        "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+        "@cf/meta/llama-3.1-8b-instruct-fp8-fast"
+      ],
+      "defaultModel": "@cf/zai-org/glm-4.7-flash",
+      "fallbackChain": [
+        "@cf/zai-org/glm-4.7-flash",
+        "@cf/openai/gpt-oss-120b",
+        "@cf/meta/llama-4-scout-17b-16e-instruct",
+        "@cf/google/gemma-4-26b-a4b-it",
+        "@cf/qwen/qwen3-30b-a3b-fp8",
+        "@cf/meta/llama-3.1-8b-instruct-fp8-fast"
+      ],
+      "free": true,
+      "requiresCard": false,
+      "status": "online",
+      "contextTokens": 131072,
+      "vision": true,
+      "visionModel": "@cf/google/gemma-4-26b-a4b-it",
+      "imageModel": "@cf/black-forest-labs/flux-2-klein-4b",
+      "modelsEndpoint": "https://api.cloudflare.com/client/v4/accounts/{account}/ai/models/search",
+      "signupURL": "https://dash.cloudflare.com/?to=/:account/ai/workers-ai",
+      "notes": "10,000 free Neurons/day shared across all models. glm-4.7-flash and gpt-oss-120b give the most tokens per Neuron. llama-3.3-70b-instruct-fp8-fast is capped at 24K context now."
     },
     "vercel": {
-      "recommendedModels": ["anthropic/claude-3.5-sonnet", "openai/gpt-4o-mini", "google/gemini-2.0-flash", "meta/llama-3.3-70b", "deepseek/deepseek-r1", "xai/grok-3"],
-      "defaultModel": "anthropic/claude-3.5-sonnet",
-      "notes": "Vercel AI Gateway $5/month free"
+      "recommendedModels": [
+        "anthropic/claude-sonnet-4.5",
+        "anthropic/claude-haiku-4.5",
+        "openai/gpt-5.6-luna",
+        "openai/gpt-5.6-terra",
+        "google/gemini-3-flash",
+        "google/gemini-2.5-flash",
+        "moonshotai/kimi-k2.5",
+        "anthropic/claude-opus-4.6"
+      ],
+      "defaultModel": "anthropic/claude-sonnet-4.5",
+      "fallbackChain": [
+        "anthropic/claude-sonnet-4.5",
+        "anthropic/claude-haiku-4.5",
+        "openai/gpt-5.6-luna",
+        "google/gemini-2.5-flash",
+        "openai/gpt-5.6-terra"
+      ],
+      "free": false,
+      "requiresCard": true,
+      "status": "online",
+      "contextTokens": 1000000,
+      "vision": true,
+      "modelsEndpoint": "https://ai-gateway.vercel.sh/v1/models",
+      "signupURL": "https://vercel.com/ai-gateway",
+      "notes": "$5/month renewing credit, zero token markup. claude-3.5-sonnet is no longer a gateway ID - use claude-sonnet-4.5 / claude-haiku-4.5.",
+      "retiredModels": {
+        "openai/gpt-4o-mini": "openai/gpt-5.6-luna",
+        "meta/llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct"
+      }
     },
     "sambaNova": {
-      "recommendedModels": ["Meta-Llama-3.3-70B-Instruct", "DeepSeek-R1", "Qwen3-32B", "Llama-4-Maverick-17B-128E-Instruct", "DeepSeek-V3.1"],
+      "recommendedModels": [
+        "Meta-Llama-3.3-70B-Instruct",
+        "gpt-oss-120b",
+        "DeepSeek-V3.2",
+        "DeepSeek-V3.1",
+        "gemma-4-31B-it",
+        "MiniMax-M2.7"
+      ],
       "defaultModel": "Meta-Llama-3.3-70B-Instruct",
-      "notes": "SambaNova fast free tier"
+      "fallbackChain": [
+        "Meta-Llama-3.3-70B-Instruct",
+        "gpt-oss-120b",
+        "DeepSeek-V3.2",
+        "DeepSeek-V3.1",
+        "gemma-4-31B-it"
+      ],
+      "free": true,
+      "requiresCard": false,
+      "status": "online",
+      "contextTokens": 131072,
+      "vision": true,
+      "modelsEndpoint": "https://api.sambanova.ai/v1/models",
+      "signupURL": "https://cloud.sambanova.ai/apis",
+      "notes": "Persistent free tier, ~200K tokens/day per model. Qwen3-32B, DeepSeek-R1 and Llama-4-Maverick are no longer in the free catalog.",
+      "retiredModels": {
+        "Qwen3-32B": "gpt-oss-120b",
+        "DeepSeek-R1": "DeepSeek-V3.2",
+        "Llama-4-Maverick-17B-128E-Instruct": "gpt-oss-120b"
+      }
     },
     "openRouter": {
-      "recommendedModels": ["meta-llama/llama-3.3-70b-instruct:free", "google/gemini-2.0-flash-exp:free", "qwen/qwen-2.5-72b-instruct:free", "mistralai/mistral-7b-instruct:free", "openrouter/free"],
-      "defaultModel": "meta-llama/llama-3.3-70b-instruct:free",
-      "notes": "OpenRouter free models"
+      "recommendedModels": [
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "inclusionai/ling-3.0-flash:free",
+        "qwen/qwen3-coder:free",
+        "nvidia/nemotron-3-super-120b-a12b:free",
+        "google/gemma-4-31b-it:free",
+        "google/gemma-4-26b-a4b-it:free",
+        "poolside/laguna-s-2.1:free",
+        "cohere/north-mini-code:free",
+        "openai/gpt-oss-20b:free",
+        "nvidia/nemotron-3-nano-30b-a3b:free",
+        "meta-llama/llama-3.3-70b-instruct:free"
+      ],
+      "defaultModel": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "fallbackChain": [
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "inclusionai/ling-3.0-flash:free",
+        "qwen/qwen3-coder:free",
+        "nvidia/nemotron-3-super-120b-a12b:free",
+        "google/gemma-4-31b-it:free",
+        "openai/gpt-oss-20b:free",
+        "meta-llama/llama-3.3-70b-instruct:free"
+      ],
+      "free": true,
+      "requiresCard": false,
+      "status": "online",
+      "contextTokens": 1000000,
+      "vision": true,
+      "modelsEndpoint": "https://openrouter.ai/api/v1/models",
+      "signupURL": "https://openrouter.ai/settings/keys",
+      "notes": "20 req/min and 50 req/day on :free models (1000/day after a one-time $10 top-up). The :free roster rotates, so the app now walks the fallback chain on 404 instead of failing.",
+      "retiredModels": {
+        "google/gemini-2.0-flash-exp:free": "google/gemma-4-31b-it:free",
+        "qwen/qwen-2.5-72b-instruct:free": "qwen/qwen3-coder:free",
+        "mistralai/mistral-7b-instruct:free": "mistralai/mistral-nemo"
+      }
     },
     "siliconFlow": {
-      "recommendedModels": ["Qwen/Qwen3-8B", "deepseek-ai/DeepSeek-V3", "meta-llama/Meta-Llama-3.1-70B-Instruct", "Qwen/Qwen3-32B"],
+      "recommendedModels": [
+        "Qwen/Qwen3-8B",
+        "Qwen/Qwen3-32B",
+        "deepseek-ai/DeepSeek-V3.1",
+        "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+        "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        "Qwen/Qwen2.5-7B-Instruct"
+      ],
       "defaultModel": "Qwen/Qwen3-8B",
-      "notes": "SiliconFlow cheap inference"
+      "fallbackChain": [
+        "Qwen/Qwen3-8B",
+        "Qwen/Qwen2.5-7B-Instruct",
+        "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        "Qwen/Qwen3-32B",
+        "deepseek-ai/DeepSeek-V3.1"
+      ],
+      "free": true,
+      "requiresCard": false,
+      "status": "online",
+      "contextTokens": 131072,
+      "vision": true,
+      "modelsEndpoint": "https://api.siliconflow.com/v1/models",
+      "signupURL": "https://cloud.siliconflow.cn/account/ak",
+      "notes": "Small Qwen/Llama checkpoints are the reliably free ones. Confirm the live list in-app before relying on a large model."
     },
     "cerebras": {
-      "recommendedModels": ["llama-3.3-70b", "llama3.1-8b", "qwen-3-32b", "llama-3.1-70b"],
-      "defaultModel": "llama-3.3-70b",
-      "notes": "Cerebras 1M tokens/day free, ultra-fast"
+      "recommendedModels": [
+        "gpt-oss-120b",
+        "qwen-3-235b-a22b-instruct-2507",
+        "zai-glm-4.7",
+        "llama3.1-8b",
+        "qwen-3-32b",
+        "llama3.1-70b"
+      ],
+      "defaultModel": "gpt-oss-120b",
+      "fallbackChain": [
+        "gpt-oss-120b",
+        "qwen-3-235b-a22b-instruct-2507",
+        "zai-glm-4.7",
+        "llama3.1-8b",
+        "qwen-3-32b"
+      ],
+      "free": false,
+      "requiresCard": true,
+      "status": "degraded",
+      "contextTokens": 131072,
+      "vision": false,
+      "modelsEndpoint": "https://api.cerebras.ai/v1/models",
+      "signupURL": "https://cloud.cerebras.ai/",
+      "notes": "CHANGED: as of Aug 2026 the no-card free tier ended - new accounts get $5 of credit that expires in 30 days and need a payment method. llama-3.3-70b is gone; use gpt-oss-120b.",
+      "retiredModels": {
+        "llama-3.3-70b": "gpt-oss-120b",
+        "llama3.1-70b-specdec": "llama3.1-70b"
+      }
     },
     "deepseek": {
-      "recommendedModels": ["deepseek-chat", "deepseek-reasoner", "deepseek-coder", "deepseek-v3"],
-      "defaultModel": "deepseek-chat",
-      "notes": "DeepSeek cheap and powerful"
+      "recommendedModels": [
+        "deepseek-v4-flash",
+        "deepseek-v4-pro"
+      ],
+      "defaultModel": "deepseek-v4-flash",
+      "fallbackChain": [
+        "deepseek-v4-flash",
+        "deepseek-v4-pro"
+      ],
+      "free": false,
+      "requiresCard": false,
+      "status": "online",
+      "contextTokens": 1000000,
+      "vision": false,
+      "modelsEndpoint": "https://api.deepseek.com/models",
+      "signupURL": "https://platform.deepseek.com/api_keys",
+      "notes": "deepseek-chat and deepseek-reasoner were retired 2026-07-24 15:59 UTC. Only deepseek-v4-flash and deepseek-v4-pro answer now. Use thinking_mode: non-thinking | thinking | thinking_max."
     },
     "nvidiaNIM": {
-      "recommendedModels": ["meta/llama-3.1-70b-instruct", "meta/llama-3.1-405b-instruct", "nvidia/llama-3.1-nemotron-70b-instruct", "mistralai/mixtral-8x22b-instruct"],
-      "defaultModel": "meta/llama-3.1-70b-instruct",
-      "notes": "NVIDIA NIM 100+ models"
+      "recommendedModels": [
+        "meta/llama-3.3-70b-instruct",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "deepseek-ai/deepseek-r1",
+        "moonshotai/kimi-k2-instruct",
+        "mistralai/mistral-large-2-instruct"
+      ],
+      "defaultModel": "meta/llama-3.3-70b-instruct",
+      "fallbackChain": [
+        "meta/llama-3.3-70b-instruct",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "moonshotai/kimi-k2-instruct",
+        "mistralai/mistral-large-2-instruct"
+      ],
+      "free": true,
+      "requiresCard": false,
+      "status": "online",
+      "contextTokens": 131072,
+      "vision": true,
+      "modelsEndpoint": "https://integrate.api.nvidia.com/v1/models",
+      "signupURL": "https://build.nvidia.com/",
+      "notes": "1,000 free credits, ~40 RPM. meta/llama-3.3-70b-instruct is the $0 workhorse; 3.1-70b is aging out."
     },
     "antigravity": {
-      "recommendedModels": ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "gpt-4o", "gemini-2.0-flash"],
-      "defaultModel": "claude-3-5-sonnet-20241022",
-      "notes": "Antigravity agent coding"
+      "recommendedModels": [],
+      "defaultModel": "",
+      "fallbackChain": [],
+      "free": false,
+      "requiresCard": false,
+      "status": "retired",
+      "contextTokens": 0,
+      "vision": false,
+      "notes": "RETIRED in v3.0. Google Antigravity has no public inference API, and this slot pointed Claude model IDs at the Gemini endpoint, which always 404'd. Disabled and excluded from Auto routing. Use APInex or Gemini instead."
     }
-  }
+  },
+  "deprecated": {
+    "moonshotai/kimi-k2-instruct-0905": "moonshotai/kimi-k2-instruct",
+    "glm-4-flash": "glm-4.7-flash",
+    "glm-4v-flash": "glm-4.6v-flash",
+    "glm-4-air": "glm-4.5-air",
+    "glm-4-plus": "glm-4.7",
+    "gemini-1.5-pro": "gemini-2.5-flash",
+    "gemini-1.5-flash": "gemini-2.5-flash-lite",
+    "deepseek-chat": "deepseek-v4-flash",
+    "deepseek-reasoner": "deepseek-v4-flash",
+    "deepseek-coder": "deepseek-v4-flash",
+    "deepseek-v3": "deepseek-v4-flash",
+    "anthropic/claude-3.5-sonnet": "anthropic/claude-sonnet-4.5",
+    "anthropic/claude-3-5-sonnet-20241022": "anthropic/claude-sonnet-4.5",
+    "anthropic/claude-3-5-haiku-20241022": "anthropic/claude-haiku-4.5",
+    "claude-3-5-sonnet-20241022": "anthropic/claude-sonnet-4.5",
+    "claude-3-5-haiku-20241022": "anthropic/claude-haiku-4.5",
+    "gpt-4o": "openai/gpt-5.6-luna",
+    "google/gemini-2.0-flash": "google/gemini-2.5-flash",
+    "openrouter/free": "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "meta/llama-3.1-70b-instruct": "meta/llama-3.3-70b-instruct",
+    "meta/llama-3.1-405b-instruct": "meta/llama-3.3-70b-instruct",
+    "nvidia/llama-3.1-nemotron-70b-instruct": "nvidia/nemotron-3-super-120b-a12b",
+    "@cf/google/gemma-3-12b-it": "@cf/google/gemma-4-26b-a4b-it",
+    "@cf/qwen/qwq-32b": "@cf/qwen/qwen3-30b-a3b-fp8",
+    "xai/grok-3": "xai/grok-4"
+  },
+  "providerOrder": [
+    "apinex",
+    "gemini",
+    "groq",
+    "zai",
+    "openRouter",
+    "nvidiaNIM",
+    "cloudflare",
+    "sambaNova",
+    "mistral",
+    "deepseek",
+    "siliconFlow",
+    "vercel",
+    "cerebras"
+  ]
 }
