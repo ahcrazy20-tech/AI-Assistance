@@ -3379,7 +3379,7 @@ struct WebProjectRevision: Identifiable, Codable, Equatable {
 actor CloudflarePagesService {
     static let shared = CloudflarePagesService()
     private let apiRoot = URL(string: "https://api.cloudflare.com/client/v4/")!
-    private let userAgent = "AIHub/2.1.0 (iOS)"
+    private let userAgent = "AIHub/3.0.0 (iOS)"
 
     func testPermissions(accountID: String, token: String) async -> KeyCheckState {
         let account = accountID.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -4812,7 +4812,7 @@ actor LiveCurrencyService {
         request.timeoutInterval = 30
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("AIHub/2.1.0 (iOS)", forHTTPHeaderField: "User-Agent")
+        request.setValue("AIHub/3.0.0 (iOS)", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             throw ServiceError("Frankfurter live rates are temporarily unavailable.", statusCode: (response as? HTTPURLResponse)?.statusCode, kind: .transient)
@@ -4837,7 +4837,7 @@ actor LiveCurrencyService {
         request.timeoutInterval = 30
         request.cachePolicy = .returnCacheDataElseLoad
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("AIHub/2.1.0 (iOS)", forHTTPHeaderField: "User-Agent")
+        request.setValue("AIHub/3.0.0 (iOS)", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
               let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],

@@ -50,6 +50,8 @@ Found while searching; each needs an in-app check before it is trusted.
 | **AI21 Labs** | Jamba Large/Mini, 200 RPM | $10 credit / 3 months | agg |
 | **Fireworks AI** | Llama 3.1 405B, DeepSeek R1 | 10 RPM free, limited without a card | agg |
 | **Scaleway** | Devstral 2 123B, Qwen3.5 400B VLM, Mistral Large 675B | EU-hosted free tier | agg |
+| **UnoRouter** | `https://api.unorouter.com/v1` — OpenAI-compatible, 190+ models with a `:free` suffix (DeepSeek V4 Flash/Pro, GLM 5.2, Qwen3.5 397B, Nemotron 3 Ultra, Kimi). No card. **Deliberately not wired**: ~1 request/minute *per model*, and the service acknowledged dropped connections and pricing glitches in July 2026. Low authority, high flakiness, and the app already has two stronger gateways. | ~1 RPM per model | agg |
+| **Chutes** | Various open-source models, OpenAI-compatible, community free tier | variable | agg |
 | **Pollinations** (images) | `gen.pollinations.ai` now needs a key, but `GET https://image.pollinations.ai/prompt/{prompt}` is still anonymous | ~1 request / 15 s, may watermark | docs |
 
 ---
@@ -77,3 +79,26 @@ Found while searching; each needs an in-app check before it is trusted.
    with a `fallbackChain`.
 3. Run `python3 tools/sync_fallback_json.py && python3 tools/validate_catalog.py`.
 4. `ProviderLiveModuleStore` discovers its models automatically.
+
+---
+
+## Full endpoint audit — all 61 external URLs, 2026-09-10
+
+Every URL in `AIHubApp.swift` was inventoried and checked, not just the LLM ones.
+
+| Endpoint | Verdict |
+|---|---|
+| `api.tavily.com/search` | Correct — POST, `Authorization: Bearer`, body keys and `results[]` parsing all match the current docs |
+| `api.frankfurter.dev/v2/rates` | Correct — and importantly it parses the **v2 row-array** shape (`[{quote, rate, date}]`), not the v1 `{rates: {}}` object. A v1 parser here would have silently broken every currency conversion. |
+| `open.er-api.com/v6/latest/{base}` | Correct — checks `result == "success"` and reads `rates` |
+| `ai-gateway.vercel.sh/v1/credits` | Correct — the API returns `{"balance": "95.50", "total_used": "4.50"}` as **strings** with a snake_case key; `Self.number` coerces both, and the lookup uses `total_used` |
+| `gen.pollinations.ai/v1/images/*` | **Was broken** — now requires a key; anonymous fallback added |
+| `generativelanguage.googleapis.com/upload/v1beta/files` | Unchanged, still the current Gemini resumable-upload path |
+| `api.cloudflare.com/client/v4/...` (Workers AI + Pages) | Unchanged |
+| `raw.githubusercontent.com/.../model_config.json` | Does not exist in the repo. Harmless — it is a second-chance fallback after `remote_models.json`. |
+
+Only defect found: a stale `AIHub/2.1.0` User-Agent in three places, now `3.0.0`.
+
+**Note on scope:** "correct" above means the request shape and response parsing match
+the provider's current documentation. None of these were exercised against a live
+server — the sandbox has no outbound network for API calls and no API keys.
