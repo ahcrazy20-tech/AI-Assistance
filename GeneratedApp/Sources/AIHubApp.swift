@@ -24,14 +24,16 @@ import BlakeHash
 // MARK: - Core models
 
 enum ProviderID: String, CaseIterable, Identifiable, Codable, Hashable {
-    case auto, gemini, groq, zai, mistral, cloudflare, vercel, sambaNova, openRouter, siliconFlow, cerebras, deepseek, nvidiaNIM, antigravity, custom
+    case auto, apinex, githubModels, gemini, groq, zai, mistral, cloudflare, vercel, sambaNova, openRouter, siliconFlow, cerebras, deepseek, nvidiaNIM, antigravity, custom
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .auto: return "Auto Fallback"
-        case .gemini: return "Google Gemini"
-        case .groq: return "Groq"
+        case .apinex: return "APInex — 8 free models, 1M context"
+        case .githubModels: return "GitHub Models — free GPT-4.1, no card"
+        case .gemini: return "Google Gemini — free Flash tier"
+        case .groq: return "Groq — LPU inference"
         case .zai: return "Z.AI — free GLM Flash"
         case .mistral: return "Mistral AI — Free mode"
         case .cloudflare: return "Cloudflare Workers AI"
@@ -39,10 +41,10 @@ enum ProviderID: String, CaseIterable, Identifiable, Codable, Hashable {
         case .sambaNova: return "SambaNova Cloud — Free tier"
         case .openRouter: return "OpenRouter Free"
         case .siliconFlow: return "SiliconFlow"
-        case .cerebras: return "Cerebras — 1M tok/day free"
-        case .deepseek: return "DeepSeek — V3/R1 cheap"
+        case .cerebras: return "Cerebras — card required since Aug 2026"
+        case .deepseek: return "DeepSeek — V4 Flash/Pro"
         case .nvidiaNIM: return "NVIDIA NIM — 100+ models"
-        case .antigravity: return "Google Antigravity — Agent-based coding"
+        case .antigravity: return "Google Antigravity — retired"
         case .custom: return "Custom OpenAI API"
         }
     }
@@ -50,6 +52,8 @@ enum ProviderID: String, CaseIterable, Identifiable, Codable, Hashable {
     var shortTitle: String {
         switch self {
         case .auto: return "Auto"
+        case .apinex: return "APInex"
+        case .githubModels: return "GitHub"
         case .gemini: return "Gemini"
         case .groq: return "Groq"
         case .zai: return "Z.AI"
@@ -66,6 +70,10 @@ enum ProviderID: String, CaseIterable, Identifiable, Codable, Hashable {
         case .custom: return "Custom"
         }
     }
+
+    /// Providers that no longer have a working public endpoint. Kept as enum
+    /// cases so a stored `selectedProvider` still decodes, but never routed to.
+    var isRetired: Bool { self == .antigravity }
 }
 
 
@@ -77,6 +85,8 @@ extension ProviderID {
         case .gemini, .openRouter, .vercel, .zai, .cloudflare, .mistral, .custom: return true
         case .groq: return false // Groq vision limited
         case .sambaNova, .siliconFlow, .cerebras, .deepseek, .nvidiaNIM, .antigravity: return true
+        case .apinex: return false // free/* models on APInex are text-only
+        case .githubModels: return true  // gpt-4.1 / gpt-4o accept image parts
         case .auto: return true
         }
     }
@@ -88,19 +98,21 @@ extension ProviderID {
     }
     var defaultModel: String {
         switch self {
-        case .gemini: return "gemini-2.0-flash"
-        case .groq: return "llama-3.3-70b-versatile"
-        case .zai: return "glm-4-flash"
-        case .mistral: return "mistral-large-latest"
-        case .cloudflare: return "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
-        case .vercel: return "anthropic/claude-3.5-sonnet"
+        case .apinex: return "free/gemini-3.8-flash"
+        case .githubModels: return "gpt-4.1"
+        case .gemini: return "gemini-3.8-flash"
+        case .groq: return "qwen/qwen3.6-27b"
+        case .zai: return "glm-4.7-flash"
+        case .mistral: return "mistral-small-latest"
+        case .cloudflare: return "@cf/zai-org/glm-4.7-flash"
+        case .vercel: return "anthropic/claude-sonnet-4.5"
         case .sambaNova: return "Meta-Llama-3.3-70B-Instruct"
-        case .openRouter: return "meta-llama/llama-3.3-70b-instruct:free"
+        case .openRouter: return "nvidia/nemotron-3-ultra-550b-a55b:free"
         case .siliconFlow: return "Qwen/Qwen3-8B"
-        case .cerebras: return "llama-3.3-70b"
-        case .deepseek: return "deepseek-chat"
-        case .nvidiaNIM: return "meta/llama-3.1-70b-instruct"
-        case .antigravity: return "claude-3-5-sonnet-20241022"
+        case .cerebras: return "gpt-oss-120b"
+        case .deepseek: return "deepseek-v4-flash"
+        case .nvidiaNIM: return "meta/llama-3.3-70b-instruct"
+        case .antigravity: return ""
         case .custom: return ""
         case .auto: return ""
         }
@@ -108,6 +120,8 @@ extension ProviderID {
     var icon: String {
         switch self {
         case .auto: return "arrow.triangle.branch"
+        case .apinex: return "bolt.horizontal.circle.fill"
+        case .githubModels: return "chevron.left.forwardslash.chevron.right"
         case .gemini: return "sparkles"
         case .groq: return "bolt.fill"
         case .zai: return "z.circle.fill"
@@ -120,13 +134,15 @@ extension ProviderID {
         case .cerebras: return "c.circle.fill"
         case .deepseek: return "d.circle.fill"
         case .nvidiaNIM: return "n.circle.fill"
-        case .antigravity: return "a.circle.fill"
+        case .antigravity: return "xmark.circle"
         case .custom: return "gearshape.fill"
         }
     }
     var color: Color {
         switch self {
         case .auto: return .primary
+        case .apinex: return .mint
+        case .githubModels: return .primary
         case .gemini: return .blue
         case .groq: return .orange
         case .zai: return .purple
@@ -139,7 +155,7 @@ extension ProviderID {
         case .cerebras: return .pink
         case .deepseek: return .blue
         case .nvidiaNIM: return .green
-        case .antigravity: return .purple
+        case .antigravity: return .gray
         case .custom: return .gray
         }
     }
@@ -702,6 +718,8 @@ enum AppTab: Int, CaseIterable, Identifiable, Hashable {
     private let defaults = UserDefaults.standard
 
     @Published var selectedProvider: ProviderID { didSet { defaults.set(selectedProvider.rawValue, forKey: "selectedProvider") } }
+    @Published var apinexModel: String { didSet { defaults.set(apinexModel, forKey: "apinexModel") } }
+    @Published var githubModelsModel: String { didSet { defaults.set(githubModelsModel, forKey: "githubModelsModel") } }
     @Published var geminiModel: String { didSet { defaults.set(geminiModel, forKey: "geminiModel") } }
     @Published var groqModel: String { didSet { defaults.set(groqModel, forKey: "groqModel") } }
     @Published var zaiModel: String { didSet { defaults.set(zaiModel, forKey: "zaiModel") } }
@@ -740,6 +758,8 @@ enum AppTab: Int, CaseIterable, Identifiable, Hashable {
     @Published var researchFreshness: ResearchFreshness { didSet { defaults.set(researchFreshness.rawValue, forKey: "researchFreshness") } }
     @Published var researchMaxResults: Int { didSet { defaults.set(researchMaxResults, forKey: "researchMaxResults") } }
 
+    @Published var apinexDailyLimit: Int { didSet { defaults.set(apinexDailyLimit, forKey: "apinexDailyLimit") } }
+    @Published var githubModelsDailyLimit: Int { didSet { defaults.set(githubModelsDailyLimit, forKey: "githubModelsDailyLimit") } }
     @Published var geminiDailyLimit: Int { didSet { defaults.set(geminiDailyLimit, forKey: "geminiDailyLimit") } }
     @Published var groqDailyLimit: Int { didSet { defaults.set(groqDailyLimit, forKey: "groqDailyLimit") } }
     @Published var zaiDailyLimit: Int { didSet { defaults.set(zaiDailyLimit, forKey: "zaiDailyLimit") } }
@@ -760,23 +780,26 @@ enum AppTab: Int, CaseIterable, Identifiable, Hashable {
     init() {
         let store = UserDefaults.standard
         selectedProvider = ProviderID(rawValue: store.string(forKey: "selectedProvider") ?? "auto") ?? .auto
-        geminiModel = store.string(forKey: "geminiModel") ?? "gemini-2.0-flash"
-        groqModel = store.string(forKey: "groqModel") ?? "llama-3.3-70b-versatile"
-        zaiModel = store.string(forKey: "zaiModel") ?? "glm-4-flash"
-        zaiVisionModel = store.string(forKey: "zaiVisionModel") ?? "glm-4v-flash"
-        mistralModel = store.string(forKey: "mistralModel") ?? "mistral-large-latest"
-        cloudflareModel = store.string(forKey: "cloudflareModel") ?? "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
-        cloudflareVisionModel = store.string(forKey: "cloudflareVisionModel") ?? "@cf/meta/llama-4-scout-17b-16e-instruct"
+        apinexModel = store.string(forKey: "apinexModel") ?? "free/gemini-3.8-flash"
+        githubModelsModel = store.string(forKey: "githubModelsModel") ?? "gpt-4.1"
+        geminiModel = store.string(forKey: "geminiModel") ?? "gemini-3.8-flash"
+        groqModel = store.string(forKey: "groqModel") ?? "qwen/qwen3.6-27b"
+        zaiModel = store.string(forKey: "zaiModel") ?? "glm-4.7-flash"
+        zaiVisionModel = store.string(forKey: "zaiVisionModel") ?? "glm-4.6v-flash"
+        mistralModel = store.string(forKey: "mistralModel") ?? "mistral-small-latest"
+        cloudflareModel = store.string(forKey: "cloudflareModel") ?? "@cf/zai-org/glm-4.7-flash"
+        cloudflareVisionModel = store.string(forKey: "cloudflareVisionModel") ?? "@cf/google/gemma-4-26b-a4b-it"
         cloudflareImageModel = store.string(forKey: "cloudflareImageModel") ?? "@cf/black-forest-labs/flux-2-klein-4b"
         cloudflareAccountID = store.string(forKey: "cloudflareAccountID") ?? ""
-        vercelModel = store.string(forKey: "vercelModel") ?? "anthropic/claude-3.5-sonnet"
+        vercelModel = store.string(forKey: "vercelModel") ?? "anthropic/claude-sonnet-4.5"
         sambaNovaModel = store.string(forKey: "sambaNovaModel") ?? "Meta-Llama-3.3-70B-Instruct"
-        openRouterModel = store.string(forKey: "openRouterModel") ?? "meta-llama/llama-3.3-70b-instruct:free"
+        openRouterModel = store.string(forKey: "openRouterModel") ?? "nvidia/nemotron-3-ultra-550b-a55b:free"
         siliconModel = store.string(forKey: "siliconModel") ?? "Qwen/Qwen3-8B"
-        cerebrasModel = store.string(forKey: "cerebrasModel") ?? "llama-3.3-70b"
-        deepseekModel = store.string(forKey: "deepseekModel") ?? "deepseek-chat"
-        nvidiaNIMModel = store.string(forKey: "nvidiaNIMModel") ?? "meta/llama-3.1-70b-instruct"
-        antigravityModel = store.string(forKey: "antigravityModel") ?? "claude-3-5-sonnet-20241022"
+        cerebrasModel = store.string(forKey: "cerebrasModel") ?? "gpt-oss-120b"
+        deepseekModel = store.string(forKey: "deepseekModel") ?? "deepseek-v4-flash"
+        nvidiaNIMModel = store.string(forKey: "nvidiaNIMModel") ?? "meta/llama-3.3-70b-instruct"
+        // Antigravity was retired in v3.0 (no public inference API ever existed).
+        antigravityModel = store.string(forKey: "antigravityModel") ?? ""
         customModel = store.string(forKey: "customModel") ?? ""
         customBaseURL = store.string(forKey: "customBaseURL") ?? "https://api.example.com/v1"
         mcpEnabled = (store.object(forKey: "mcpEnabled") as? Bool) ?? false
@@ -803,8 +826,11 @@ enum AppTab: Int, CaseIterable, Identifiable, Hashable {
             let result = store.integer(forKey: key)
             return result == 0 ? fallback : result
         }
-        geminiDailyLimit = value("geminiDailyLimit", fallback: 250)
-        groqDailyLimit = value("groqDailyLimit", fallback: 1000)
+        // Daily budgets re-derived from the free-tier tables verified 2026-09-10.
+        apinexDailyLimit = value("apinexDailyLimit", fallback: 500)
+        githubModelsDailyLimit = value("githubModelsDailyLimit", fallback: 50)   // 50 RPD on gpt-4.1
+        geminiDailyLimit = value("geminiDailyLimit", fallback: 1000)   // ~1500 RPD on Flash
+        groqDailyLimit = value("groqDailyLimit", fallback: 1000)       // 1000 RPD on gpt-oss-120b
         zaiDailyLimit = value("zaiDailyLimit", fallback: 1000)
         mistralDailyLimit = value("mistralDailyLimit", fallback: 1000)
         cloudflareDailyLimit = value("cloudflareDailyLimit", fallback: 500)
@@ -812,7 +838,7 @@ enum AppTab: Int, CaseIterable, Identifiable, Hashable {
         sambaNovaDailyLimit = value("sambaNovaDailyLimit", fallback: 20)
         openRouterDailyLimit = value("openRouterDailyLimit", fallback: 50)
         siliconDailyLimit = value("siliconDailyLimit", fallback: 200)
-        cerebrasDailyLimit = value("cerebrasDailyLimit", fallback: 1000)
+        cerebrasDailyLimit = value("cerebrasDailyLimit", fallback: 200)  // card-gated since Aug 2026
         deepseekDailyLimit = value("deepseekDailyLimit", fallback: 500)
         nvidiaNIMDailyLimit = value("nvidiaNIMDailyLimit", fallback: 200)
         antigravityDailyLimit = value("antigravityDailyLimit", fallback: 100)
@@ -844,6 +870,8 @@ enum AppTab: Int, CaseIterable, Identifiable, Hashable {
 
     func model(for provider: ProviderID, visual: Bool = false) -> String {
         switch provider {
+        case .apinex: return apinexModel
+        case .githubModels: return githubModelsModel
         case .gemini: return geminiModel
         case .groq: return groqModel
         case .zai: return visual ? zaiVisionModel : zaiModel
@@ -864,6 +892,8 @@ enum AppTab: Int, CaseIterable, Identifiable, Hashable {
 
     func baseURL(for provider: ProviderID) -> String {
         switch provider {
+        case .apinex: return "https://api.apinex.bond/v1"
+        case .githubModels: return "https://models.inference.ai.azure.com"
         case .groq: return "https://api.groq.com/openai/v1"
         case .zai: return "https://api.z.ai/api/paas/v4"
         case .mistral: return "https://api.mistral.ai/v1"
@@ -875,9 +905,12 @@ enum AppTab: Int, CaseIterable, Identifiable, Hashable {
         case .openRouter: return "https://openrouter.ai/api/v1"
         case .siliconFlow: return "https://api.siliconflow.com/v1"
         case .cerebras: return "https://api.cerebras.ai/v1"
-        case .deepseek: return "https://api.deepseek.com"
+        case .deepseek: return "https://api.deepseek.com/v1"
         case .nvidiaNIM: return "https://integrate.api.nvidia.com/v1"
-        case .antigravity: return "https://generativelanguage.googleapis.com/v1beta"
+        // Retired: Antigravity has no public inference API. Left empty on purpose so
+        // the request fails fast with a clear configuration error instead of
+        // POSTing Claude model IDs to the Gemini endpoint (which always 404'd).
+        case .antigravity: return ""
         case .custom: return customBaseURL
         default: return ""
         }
@@ -885,6 +918,8 @@ enum AppTab: Int, CaseIterable, Identifiable, Hashable {
 
     func dailyLimit(for provider: ProviderID) -> Int {
         switch provider {
+        case .apinex: return apinexDailyLimit
+        case .githubModels: return githubModelsDailyLimit
         case .gemini: return geminiDailyLimit
         case .groq: return groqDailyLimit
         case .zai: return zaiDailyLimit
@@ -1428,11 +1463,31 @@ struct RemoteModelConfig: Codable {
     let version: String
     let updatedAt: String
     let providers: [String: RemoteProviderConfig]
+    /// v3.0. Globally dead model ID -> live replacement. Optional so a v2.x
+    /// payload still decodes and simply skips the rewrite layer.
+    let deprecated: [String: String]?
+    /// v3.0. Preferred display / routing order.
+    let providerOrder: [String]?
 }
 struct RemoteProviderConfig: Codable {
     let recommendedModels: [String]
     let defaultModel: String?
     let notes: String?
+    // Everything below is v3.0 and optional, so an older payload still decodes.
+    /// Ordered models to try when the current one 404s.
+    let fallbackChain: [String]?
+    /// Models retired on THIS provider only, mapped to their replacement.
+    let retiredModels: [String: String]?
+    let free: Bool?
+    let requiresCard: Bool?
+    let status: String?
+    let contextTokens: Int?
+    let vision: Bool?
+    let visionModel: String?
+    let imageModel: String?
+    let baseURL: String?
+    let modelsEndpoint: String?
+    let signupURL: String?
 }
 
 @MainActor final class RemoteModelConfigService: ObservableObject {
@@ -1443,23 +1498,487 @@ struct RemoteProviderConfig: Codable {
     
     private let fallbackJSON = """
     {
-      "version": "2.1",
-      "updatedAt": "2026-05-01",
+      "version": "3.0",
+      "updatedAt": "2026-09-10",
       "providers": {
-        "gemini": {"recommendedModels": ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite"], "defaultModel": "gemini-2.0-flash"},
-        "groq": {"recommendedModels": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b", "qwen/qwen3-32b", "meta-llama/llama-4-maverick-17b-128e-instruct"], "defaultModel": "llama-3.3-70b-versatile"},
-        "zai": {"recommendedModels": ["glm-4-flash", "glm-4-air", "glm-4-plus", "glm-4v-flash"], "defaultModel": "glm-4-flash"},
-        "mistral": {"recommendedModels": ["mistral-large-latest", "mistral-small-latest", "pixtral-large-latest", "codestral-latest"], "defaultModel": "mistral-large-latest"},
-        "cloudflare": {"recommendedModels": ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/meta/llama-4-scout-17b-16e-instruct", "@cf/mistralai/mistral-small-3.1-24b-instruct", "@cf/openai/gpt-oss-120b", "@cf/google/gemma-3-12b-it"], "defaultModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast"},
-        "vercel": {"recommendedModels": ["anthropic/claude-3.5-sonnet", "openai/gpt-4o-mini", "google/gemini-2.0-flash", "meta/llama-3.3-70b", "deepseek/deepseek-r1"], "defaultModel": "anthropic/claude-3.5-sonnet"},
-        "sambaNova": {"recommendedModels": ["Meta-Llama-3.3-70B-Instruct", "DeepSeek-R1", "Qwen3-32B", "Llama-4-Maverick-17B-128E-Instruct"], "defaultModel": "Meta-Llama-3.3-70B-Instruct"},
-        "openRouter": {"recommendedModels": ["meta-llama/llama-3.3-70b-instruct:free", "google/gemini-2.0-flash-exp:free", "qwen/qwen-2.5-72b-instruct:free", "mistralai/mistral-7b-instruct:free"], "defaultModel": "meta-llama/llama-3.3-70b-instruct:free"},
-        "siliconFlow": {"recommendedModels": ["Qwen/Qwen3-8B", "deepseek-ai/DeepSeek-V3", "meta-llama/Meta-Llama-3.1-70B-Instruct"], "defaultModel": "Qwen/Qwen3-8B"},
-        "cerebras": {"recommendedModels": ["llama-3.3-70b", "llama3.1-8b", "qwen-3-32b"], "defaultModel": "llama-3.3-70b"},
-        "deepseek": {"recommendedModels": ["deepseek-chat", "deepseek-reasoner", "deepseek-coder"], "defaultModel": "deepseek-chat"},
-        "nvidiaNIM": {"recommendedModels": ["meta/llama-3.1-70b-instruct", "meta/llama-3.1-405b-instruct", "nvidia/llama-3.1-nemotron-70b-instruct"], "defaultModel": "meta/llama-3.1-70b-instruct"},
-        "antigravity": {"recommendedModels": ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"], "defaultModel": "claude-3-5-sonnet-20241022"}
-      }
+        "apinex": {
+          "recommendedModels": [
+            "free/gemini-3.8-flash",
+            "free/gemini-3.1-pro",
+            "free/qwen-3.8-max",
+            "free/glm-5.3-flash",
+            "free/gpt-5.6-luna",
+            "free/deepseek-v4-flash-0731",
+            "free/deepseek-v4-pro-0813",
+            "free/muse-spark-1.3"
+          ],
+          "defaultModel": "free/gemini-3.8-flash",
+          "notes": "NEW in v3.0. OpenAI-compatible gateway, one key, 1M context on every free model. free/* models cost nothing. Live catalog: https://apinex.bond/api/public/models",
+          "fallbackChain": [
+            "free/gemini-3.8-flash",
+            "free/qwen-3.8-max",
+            "free/glm-5.3-flash",
+            "free/deepseek-v4-flash-0731",
+            "free/gpt-5.6-luna",
+            "free/gemini-3.1-pro",
+            "free/deepseek-v4-pro-0813",
+            "free/muse-spark-1.3"
+          ],
+          "free": true,
+          "requiresCard": false,
+          "status": "online",
+          "contextTokens": 1000000,
+          "vision": false,
+          "baseURL": "https://api.apinex.bond/v1",
+          "modelsEndpoint": "https://apinex.bond/api/public/models",
+          "signupURL": "https://apinex.bond/register"
+        },
+        "githubModels": {
+          "recommendedModels": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "Meta-Llama-3.3-70B",
+            "Mistral-Small-3.1",
+            "DeepSeek-R1",
+            "Llama-4-Scout-17B-16E",
+            "o4-mini",
+            "o3-mini",
+            "Phi-4"
+          ],
+          "defaultModel": "gpt-4.1",
+          "notes": "NEW in v3.0. Permanently free, no card, OpenAI-compatible. Authenticates with an ordinary GitHub token. gpt-4.1 carries a 1M-token window; gpt-4.1-mini has the most generous allowance (15 RPM / 150 RPD). The o3-mini / o4-mini reasoning models are listed but kept out of the automatic fallback chain because they take different request parameters.",
+          "fallbackChain": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "Meta-Llama-3.3-70B",
+            "Mistral-Small-3.1",
+            "DeepSeek-R1"
+          ],
+          "free": true,
+          "requiresCard": false,
+          "status": "online",
+          "contextTokens": 1000000,
+          "vision": true,
+          "baseURL": "https://models.inference.ai.azure.com",
+          "modelsEndpoint": "https://models.inference.ai.azure.com/models",
+          "signupURL": "https://github.com/settings/tokens"
+        },
+        "gemini": {
+          "recommendedModels": [
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3-flash-preview",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash-lite"
+          ],
+          "defaultModel": "gemini-3.8-flash",
+          "notes": "Flash family is the free tier (10-15 RPM, ~1500 RPD); Pro models moved behind billing. 3.8 -> 2.5 all answer on a free key. Native vision + PDF + 1M context.",
+          "fallbackChain": [
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3-flash-preview",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite"
+          ],
+          "free": true,
+          "requiresCard": false,
+          "status": "online",
+          "contextTokens": 1000000,
+          "vision": true,
+          "modelsEndpoint": "https://generativelanguage.googleapis.com/v1beta/models",
+          "signupURL": "https://aistudio.google.com/apikey"
+        },
+        "groq": {
+          "recommendedModels": [
+            "qwen/qwen3.6-27b",
+            "openai/gpt-oss-120b",
+            "minimaxai/minimax-m2.7",
+            "moonshotai/kimi-k2-instruct",
+            "openai/gpt-oss-20b",
+            "openai/gpt-oss-safeguard-20b",
+            "groq/compound",
+            "groq/compound-mini"
+          ],
+          "defaultModel": "qwen/qwen3.6-27b",
+          "notes": "llama-3.3-70b-versatile and llama-3.1-8b-instant were shut down 2026-08-16. Groq's own recommended replacements are qwen/qwen3.6-27b and openai/gpt-oss-120b.",
+          "fallbackChain": [
+            "qwen/qwen3.6-27b",
+            "openai/gpt-oss-120b",
+            "minimaxai/minimax-m2.7",
+            "openai/gpt-oss-20b",
+            "moonshotai/kimi-k2-instruct",
+            "groq/compound"
+          ],
+          "retiredModels": {
+            "llama-3.3-70b-versatile": "qwen/qwen3.6-27b",
+            "llama-3.1-8b-instant": "openai/gpt-oss-20b",
+            "qwen/qwen3-32b": "openai/gpt-oss-120b",
+            "meta-llama/llama-4-scout-17b-16e-instruct": "openai/gpt-oss-120b",
+            "meta-llama/llama-4-maverick-17b-128e-instruct": "openai/gpt-oss-120b",
+            "allam-2-7b-instruct": "qwen/qwen3.6-27b",
+            "meta-llama/llama-guard-4-12b": "openai/gpt-oss-safeguard-20b"
+          },
+          "free": true,
+          "requiresCard": false,
+          "status": "online",
+          "contextTokens": 131072,
+          "vision": false,
+          "modelsEndpoint": "https://api.groq.com/openai/v1/models",
+          "signupURL": "https://console.groq.com/keys"
+        },
+        "zai": {
+          "recommendedModels": [
+            "glm-4.7-flash",
+            "glm-4.5-flash",
+            "glm-4.7",
+            "glm-4.6",
+            "glm-4.5-air",
+            "glm-4.5"
+          ],
+          "defaultModel": "glm-4.7-flash",
+          "notes": "Only glm-4.7-flash, glm-4.5-flash and glm-4.6v-flash are $0. Everything else bills. glm-4-flash / glm-4v-flash no longer resolve.",
+          "fallbackChain": [
+            "glm-4.7-flash",
+            "glm-4.5-flash",
+            "glm-4.7",
+            "glm-4.6",
+            "glm-4.5-air"
+          ],
+          "free": true,
+          "requiresCard": false,
+          "status": "online",
+          "contextTokens": 203000,
+          "vision": false,
+          "visionModel": "glm-4.6v-flash",
+          "modelsEndpoint": "https://api.z.ai/api/paas/v4/models",
+          "signupURL": "https://z.ai/manage-apikey/apikey-list"
+        },
+        "mistral": {
+          "recommendedModels": [
+            "mistral-small-latest",
+            "mistral-medium-2508",
+            "devstral-small",
+            "magistral-small",
+            "codestral-latest",
+            "mistral-large-latest",
+            "pixtral-large-latest",
+            "open-mistral-nemo",
+            "mistral-small-3.2-24b-instruct"
+          ],
+          "defaultModel": "mistral-small-latest",
+          "notes": "Free Experiment tier is ~1B tokens/month but roughly 1 request/second. mistral-small-latest is the right default; mistral-large-latest burns the rate limit fast.",
+          "fallbackChain": [
+            "mistral-small-latest",
+            "mistral-medium-2508",
+            "devstral-small",
+            "open-mistral-nemo",
+            "codestral-latest",
+            "mistral-large-latest"
+          ],
+          "free": true,
+          "requiresCard": false,
+          "status": "online",
+          "contextTokens": 256000,
+          "vision": true,
+          "modelsEndpoint": "https://api.mistral.ai/v1/models",
+          "signupURL": "https://console.mistral.ai/api-keys"
+        },
+        "cloudflare": {
+          "recommendedModels": [
+            "@cf/zai-org/glm-4.7-flash",
+            "@cf/openai/gpt-oss-120b",
+            "@cf/meta/llama-4-scout-17b-16e-instruct",
+            "@cf/google/gemma-4-26b-a4b-it",
+            "@cf/qwen/qwen3-30b-a3b-fp8",
+            "@cf/nvidia/nemotron-3-120b-a12b",
+            "@cf/moonshotai/kimi-k2.6",
+            "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+            "@cf/meta/llama-3.1-8b-instruct-fp8-fast"
+          ],
+          "defaultModel": "@cf/zai-org/glm-4.7-flash",
+          "notes": "10,000 free Neurons/day shared across all models. glm-4.7-flash and gpt-oss-120b give the most tokens per Neuron. llama-3.3-70b-instruct-fp8-fast is capped at 24K context now.",
+          "fallbackChain": [
+            "@cf/zai-org/glm-4.7-flash",
+            "@cf/openai/gpt-oss-120b",
+            "@cf/meta/llama-4-scout-17b-16e-instruct",
+            "@cf/google/gemma-4-26b-a4b-it",
+            "@cf/qwen/qwen3-30b-a3b-fp8",
+            "@cf/meta/llama-3.1-8b-instruct-fp8-fast"
+          ],
+          "free": true,
+          "requiresCard": false,
+          "status": "online",
+          "contextTokens": 131072,
+          "vision": true,
+          "visionModel": "@cf/google/gemma-4-26b-a4b-it",
+          "imageModel": "@cf/black-forest-labs/flux-2-klein-4b",
+          "modelsEndpoint": "https://api.cloudflare.com/client/v4/accounts/{account}/ai/models/search",
+          "signupURL": "https://dash.cloudflare.com/?to=/:account/ai/workers-ai"
+        },
+        "vercel": {
+          "recommendedModels": [
+            "anthropic/claude-sonnet-4.5",
+            "anthropic/claude-haiku-4.5",
+            "openai/gpt-5.6-luna",
+            "openai/gpt-5.6-terra",
+            "google/gemini-3-flash",
+            "google/gemini-2.5-flash",
+            "moonshotai/kimi-k2.5",
+            "anthropic/claude-opus-4.6"
+          ],
+          "defaultModel": "anthropic/claude-sonnet-4.5",
+          "notes": "$5/month renewing credit, zero token markup. claude-3.5-sonnet is no longer a gateway ID - use claude-sonnet-4.5 / claude-haiku-4.5.",
+          "fallbackChain": [
+            "anthropic/claude-sonnet-4.5",
+            "anthropic/claude-haiku-4.5",
+            "openai/gpt-5.6-luna",
+            "google/gemini-2.5-flash",
+            "openai/gpt-5.6-terra"
+          ],
+          "retiredModels": {
+            "openai/gpt-4o-mini": "openai/gpt-5.6-luna",
+            "meta/llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct",
+            "gpt-4o": "openai/gpt-5.6-luna"
+          },
+          "free": false,
+          "requiresCard": true,
+          "status": "online",
+          "contextTokens": 1000000,
+          "vision": true,
+          "modelsEndpoint": "https://ai-gateway.vercel.sh/v1/models",
+          "signupURL": "https://vercel.com/ai-gateway"
+        },
+        "sambaNova": {
+          "recommendedModels": [
+            "Meta-Llama-3.3-70B-Instruct",
+            "gpt-oss-120b",
+            "DeepSeek-V3.2",
+            "DeepSeek-V3.1",
+            "gemma-4-31B-it",
+            "MiniMax-M2.7"
+          ],
+          "defaultModel": "Meta-Llama-3.3-70B-Instruct",
+          "notes": "Persistent free tier, ~200K tokens/day per model. Qwen3-32B, DeepSeek-R1 and Llama-4-Maverick are no longer in the free catalog.",
+          "fallbackChain": [
+            "Meta-Llama-3.3-70B-Instruct",
+            "gpt-oss-120b",
+            "DeepSeek-V3.2",
+            "DeepSeek-V3.1",
+            "gemma-4-31B-it"
+          ],
+          "retiredModels": {
+            "Qwen3-32B": "gpt-oss-120b",
+            "DeepSeek-R1": "DeepSeek-V3.2",
+            "Llama-4-Maverick-17B-128E-Instruct": "gpt-oss-120b"
+          },
+          "free": true,
+          "requiresCard": false,
+          "status": "online",
+          "contextTokens": 131072,
+          "vision": true,
+          "modelsEndpoint": "https://api.sambanova.ai/v1/models",
+          "signupURL": "https://cloud.sambanova.ai/apis"
+        },
+        "openRouter": {
+          "recommendedModels": [
+            "nvidia/nemotron-3-ultra-550b-a55b:free",
+            "inclusionai/ling-3.0-flash:free",
+            "qwen/qwen3-coder:free",
+            "nvidia/nemotron-3-super-120b-a12b:free",
+            "google/gemma-4-31b-it:free",
+            "google/gemma-4-26b-a4b-it:free",
+            "poolside/laguna-s-2.1:free",
+            "cohere/north-mini-code:free",
+            "openai/gpt-oss-20b:free",
+            "nvidia/nemotron-3-nano-30b-a3b:free",
+            "meta-llama/llama-3.3-70b-instruct:free"
+          ],
+          "defaultModel": "nvidia/nemotron-3-ultra-550b-a55b:free",
+          "notes": "20 req/min and 50 req/day on :free models (1000/day after a one-time $10 top-up). The :free roster rotates, so the app now walks the fallback chain on 404 instead of failing.",
+          "fallbackChain": [
+            "nvidia/nemotron-3-ultra-550b-a55b:free",
+            "inclusionai/ling-3.0-flash:free",
+            "qwen/qwen3-coder:free",
+            "nvidia/nemotron-3-super-120b-a12b:free",
+            "google/gemma-4-31b-it:free",
+            "openai/gpt-oss-20b:free",
+            "meta-llama/llama-3.3-70b-instruct:free"
+          ],
+          "retiredModels": {
+            "google/gemini-2.0-flash-exp:free": "google/gemma-4-31b-it:free",
+            "qwen/qwen-2.5-72b-instruct:free": "qwen/qwen3-coder:free",
+            "mistralai/mistral-7b-instruct:free": "mistralai/mistral-nemo"
+          },
+          "free": true,
+          "requiresCard": false,
+          "status": "online",
+          "contextTokens": 1000000,
+          "vision": true,
+          "modelsEndpoint": "https://openrouter.ai/api/v1/models",
+          "signupURL": "https://openrouter.ai/settings/keys"
+        },
+        "siliconFlow": {
+          "recommendedModels": [
+            "Qwen/Qwen3-8B",
+            "Qwen/Qwen3-32B",
+            "deepseek-ai/DeepSeek-V3.1",
+            "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+            "meta-llama/Meta-Llama-3.1-8B-Instruct",
+            "Qwen/Qwen2.5-7B-Instruct"
+          ],
+          "defaultModel": "Qwen/Qwen3-8B",
+          "notes": "Small Qwen/Llama checkpoints are the reliably free ones. Confirm the live list in-app before relying on a large model.",
+          "fallbackChain": [
+            "Qwen/Qwen3-8B",
+            "Qwen/Qwen2.5-7B-Instruct",
+            "meta-llama/Meta-Llama-3.1-8B-Instruct",
+            "Qwen/Qwen3-32B",
+            "deepseek-ai/DeepSeek-V3.1"
+          ],
+          "free": true,
+          "requiresCard": false,
+          "status": "online",
+          "contextTokens": 131072,
+          "vision": true,
+          "modelsEndpoint": "https://api.siliconflow.com/v1/models",
+          "signupURL": "https://cloud.siliconflow.cn/account/ak"
+        },
+        "cerebras": {
+          "recommendedModels": [
+            "gpt-oss-120b",
+            "qwen-3-235b-a22b-instruct-2507",
+            "zai-glm-4.7",
+            "llama3.1-8b",
+            "qwen-3-32b",
+            "llama3.1-70b"
+          ],
+          "defaultModel": "gpt-oss-120b",
+          "notes": "CHANGED: as of Aug 2026 the no-card free tier ended - new accounts get $5 of credit that expires in 30 days and need a payment method. llama-3.3-70b is gone; use gpt-oss-120b.",
+          "fallbackChain": [
+            "gpt-oss-120b",
+            "qwen-3-235b-a22b-instruct-2507",
+            "zai-glm-4.7",
+            "llama3.1-8b",
+            "qwen-3-32b"
+          ],
+          "retiredModels": {
+            "llama-3.3-70b": "gpt-oss-120b",
+            "llama3.1-70b-specdec": "llama3.1-70b"
+          },
+          "free": false,
+          "requiresCard": true,
+          "status": "degraded",
+          "contextTokens": 131072,
+          "vision": false,
+          "modelsEndpoint": "https://api.cerebras.ai/v1/models",
+          "signupURL": "https://cloud.cerebras.ai/"
+        },
+        "deepseek": {
+          "recommendedModels": [
+            "deepseek-v4-flash",
+            "deepseek-v4-pro"
+          ],
+          "defaultModel": "deepseek-v4-flash",
+          "notes": "deepseek-chat and deepseek-reasoner were retired 2026-07-24 15:59 UTC. Only deepseek-v4-flash and deepseek-v4-pro answer now. Use thinking_mode: non-thinking | thinking | thinking_max.",
+          "fallbackChain": [
+            "deepseek-v4-flash",
+            "deepseek-v4-pro"
+          ],
+          "free": false,
+          "requiresCard": false,
+          "status": "online",
+          "contextTokens": 1000000,
+          "vision": false,
+          "modelsEndpoint": "https://api.deepseek.com/models",
+          "signupURL": "https://platform.deepseek.com/api_keys"
+        },
+        "nvidiaNIM": {
+          "recommendedModels": [
+            "meta/llama-3.3-70b-instruct",
+            "nvidia/nemotron-3-super-120b-a12b",
+            "deepseek-ai/deepseek-r1",
+            "moonshotai/kimi-k2-instruct",
+            "mistralai/mistral-large-2-instruct"
+          ],
+          "defaultModel": "meta/llama-3.3-70b-instruct",
+          "notes": "1,000 free credits, ~40 RPM. meta/llama-3.3-70b-instruct is the $0 workhorse; 3.1-70b is aging out.",
+          "fallbackChain": [
+            "meta/llama-3.3-70b-instruct",
+            "nvidia/nemotron-3-super-120b-a12b",
+            "moonshotai/kimi-k2-instruct",
+            "mistralai/mistral-large-2-instruct"
+          ],
+          "free": true,
+          "requiresCard": false,
+          "status": "online",
+          "contextTokens": 131072,
+          "vision": true,
+          "modelsEndpoint": "https://integrate.api.nvidia.com/v1/models",
+          "signupURL": "https://build.nvidia.com/"
+        },
+        "antigravity": {
+          "recommendedModels": [],
+          "defaultModel": "",
+          "notes": "RETIRED in v3.0. Google Antigravity has no public inference API, and this slot pointed Claude model IDs at the Gemini endpoint, which always 404'd. Disabled and excluded from Auto routing. Use APInex or Gemini instead.",
+          "fallbackChain": [],
+          "free": false,
+          "requiresCard": false,
+          "status": "retired",
+          "contextTokens": 0,
+          "vision": false
+        }
+      },
+      "deprecated": {
+        "moonshotai/kimi-k2-instruct-0905": "moonshotai/kimi-k2-instruct",
+        "glm-4-flash": "glm-4.7-flash",
+        "glm-4v-flash": "glm-4.6v-flash",
+        "glm-4-air": "glm-4.5-air",
+        "glm-4-plus": "glm-4.7",
+        "gemini-1.5-pro": "gemini-2.5-flash",
+        "gemini-1.5-flash": "gemini-2.5-flash-lite",
+        "deepseek-chat": "deepseek-v4-flash",
+        "deepseek-reasoner": "deepseek-v4-flash",
+        "deepseek-coder": "deepseek-v4-flash",
+        "deepseek-v3": "deepseek-v4-flash",
+        "anthropic/claude-3.5-sonnet": "anthropic/claude-sonnet-4.5",
+        "anthropic/claude-3-5-sonnet-20241022": "anthropic/claude-sonnet-4.5",
+        "anthropic/claude-3-5-haiku-20241022": "anthropic/claude-haiku-4.5",
+        "claude-3-5-sonnet-20241022": "anthropic/claude-sonnet-4.5",
+        "claude-3-5-haiku-20241022": "anthropic/claude-haiku-4.5",
+        "google/gemini-2.0-flash": "google/gemini-2.5-flash",
+        "openrouter/free": "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "meta/llama-3.1-70b-instruct": "meta/llama-3.3-70b-instruct",
+        "meta/llama-3.1-405b-instruct": "meta/llama-3.3-70b-instruct",
+        "nvidia/llama-3.1-nemotron-70b-instruct": "nvidia/nemotron-3-super-120b-a12b",
+        "@cf/google/gemma-3-12b-it": "@cf/google/gemma-4-26b-a4b-it",
+        "@cf/qwen/qwq-32b": "@cf/qwen/qwen3-30b-a3b-fp8",
+        "xai/grok-3": "xai/grok-4"
+      },
+      "providerOrder": [
+        "apinex",
+        "githubModels",
+        "gemini",
+        "groq",
+        "zai",
+        "openRouter",
+        "nvidiaNIM",
+        "cloudflare",
+        "sambaNova",
+        "mistral",
+        "deepseek",
+        "siliconFlow",
+        "vercel",
+        "cerebras"
+      ]
     }
     """
     
@@ -1467,6 +1986,8 @@ struct RemoteProviderConfig: Codable {
         if let data = fallbackJSON.data(using: .utf8) {
             config = try? JSONDecoder().decode(RemoteModelConfig.self, from: data)
         }
+        // Seed the request-path self-healing tables before the first network call.
+        if let config { ModelCatalog.shared.update(from: config) }
     }
     
     func fetch() async {
@@ -1486,6 +2007,7 @@ struct RemoteProviderConfig: Codable {
                 guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { continue }
                 if let decoded = try? JSONDecoder().decode(RemoteModelConfig.self, from: data) {
                     config = decoded
+                    ModelCatalog.shared.update(from: decoded)
                     lastFetch = Date()
                     return
                 }
@@ -1501,6 +2023,255 @@ struct RemoteProviderConfig: Codable {
     }
     func defaultModel(for provider: ProviderID) -> String? {
         config?.providers[provider.rawValue]?.defaultModel
+    }
+}
+
+// MARK: - Model catalog self-healing (v3.0)
+
+/// Compiled-in copy of the catalog's deprecation tables and fallback chains.
+/// GENERATED — do not edit by hand. Run `python3 tools/sync_fallback_json.py`,
+/// which rebuilds this block from remote_models.json.
+/// MARK: MODEL_CATALOG_DEFAULTS_BEGIN
+
+enum ModelCatalogDefaults {
+    static let globalDeprecated: [String: String] = [
+        "@cf/google/gemma-3-12b-it": "@cf/google/gemma-4-26b-a4b-it",
+        "@cf/qwen/qwq-32b": "@cf/qwen/qwen3-30b-a3b-fp8",
+        "anthropic/claude-3-5-haiku-20241022": "anthropic/claude-haiku-4.5",
+        "anthropic/claude-3-5-sonnet-20241022": "anthropic/claude-sonnet-4.5",
+        "anthropic/claude-3.5-sonnet": "anthropic/claude-sonnet-4.5",
+        "claude-3-5-haiku-20241022": "anthropic/claude-haiku-4.5",
+        "claude-3-5-sonnet-20241022": "anthropic/claude-sonnet-4.5",
+        "deepseek-chat": "deepseek-v4-flash",
+        "deepseek-coder": "deepseek-v4-flash",
+        "deepseek-reasoner": "deepseek-v4-flash",
+        "deepseek-v3": "deepseek-v4-flash",
+        "gemini-1.5-flash": "gemini-2.5-flash-lite",
+        "gemini-1.5-pro": "gemini-2.5-flash",
+        "glm-4-air": "glm-4.5-air",
+        "glm-4-flash": "glm-4.7-flash",
+        "glm-4-plus": "glm-4.7",
+        "glm-4v-flash": "glm-4.6v-flash",
+        "google/gemini-2.0-flash": "google/gemini-2.5-flash",
+        "meta/llama-3.1-405b-instruct": "meta/llama-3.3-70b-instruct",
+        "meta/llama-3.1-70b-instruct": "meta/llama-3.3-70b-instruct",
+        "moonshotai/kimi-k2-instruct-0905": "moonshotai/kimi-k2-instruct",
+        "nvidia/llama-3.1-nemotron-70b-instruct": "nvidia/nemotron-3-super-120b-a12b",
+        "openrouter/free": "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "xai/grok-3": "xai/grok-4"
+    ]
+    static let retiredByProvider: [String: [String: String]] = [
+        "cerebras": [
+            "llama-3.3-70b": "gpt-oss-120b",
+            "llama3.1-70b-specdec": "llama3.1-70b"
+        ],
+        "groq": [
+            "allam-2-7b-instruct": "qwen/qwen3.6-27b",
+            "llama-3.1-8b-instant": "openai/gpt-oss-20b",
+            "llama-3.3-70b-versatile": "qwen/qwen3.6-27b",
+            "meta-llama/llama-4-maverick-17b-128e-instruct": "openai/gpt-oss-120b",
+            "meta-llama/llama-4-scout-17b-16e-instruct": "openai/gpt-oss-120b",
+            "meta-llama/llama-guard-4-12b": "openai/gpt-oss-safeguard-20b",
+            "qwen/qwen3-32b": "openai/gpt-oss-120b"
+        ],
+        "openRouter": [
+            "google/gemini-2.0-flash-exp:free": "google/gemma-4-31b-it:free",
+            "mistralai/mistral-7b-instruct:free": "mistralai/mistral-nemo",
+            "qwen/qwen-2.5-72b-instruct:free": "qwen/qwen3-coder:free"
+        ],
+        "sambaNova": [
+            "DeepSeek-R1": "DeepSeek-V3.2",
+            "Llama-4-Maverick-17B-128E-Instruct": "gpt-oss-120b",
+            "Qwen3-32B": "gpt-oss-120b"
+        ],
+        "vercel": [
+            "gpt-4o": "openai/gpt-5.6-luna",
+            "meta/llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct",
+            "openai/gpt-4o-mini": "openai/gpt-5.6-luna"
+        ]
+    ]
+    static let chains: [String: [String]] = [
+        "apinex": [
+            "free/gemini-3.8-flash",
+            "free/qwen-3.8-max",
+            "free/glm-5.3-flash",
+            "free/deepseek-v4-flash-0731",
+            "free/gpt-5.6-luna",
+            "free/gemini-3.1-pro",
+            "free/deepseek-v4-pro-0813",
+            "free/muse-spark-1.3"
+        ],
+        "cerebras": [
+            "gpt-oss-120b",
+            "qwen-3-235b-a22b-instruct-2507",
+            "zai-glm-4.7",
+            "llama3.1-8b",
+            "qwen-3-32b"
+        ],
+        "cloudflare": [
+            "@cf/zai-org/glm-4.7-flash",
+            "@cf/openai/gpt-oss-120b",
+            "@cf/meta/llama-4-scout-17b-16e-instruct",
+            "@cf/google/gemma-4-26b-a4b-it",
+            "@cf/qwen/qwen3-30b-a3b-fp8",
+            "@cf/meta/llama-3.1-8b-instruct-fp8-fast"
+        ],
+        "deepseek": [
+            "deepseek-v4-flash",
+            "deepseek-v4-pro"
+        ],
+        "gemini": [
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3-flash-preview",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite"
+        ],
+        "githubModels": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "Meta-Llama-3.3-70B",
+            "Mistral-Small-3.1",
+            "DeepSeek-R1"
+        ],
+        "groq": [
+            "qwen/qwen3.6-27b",
+            "openai/gpt-oss-120b",
+            "minimaxai/minimax-m2.7",
+            "openai/gpt-oss-20b",
+            "moonshotai/kimi-k2-instruct",
+            "groq/compound"
+        ],
+        "mistral": [
+            "mistral-small-latest",
+            "mistral-medium-2508",
+            "devstral-small",
+            "open-mistral-nemo",
+            "codestral-latest",
+            "mistral-large-latest"
+        ],
+        "nvidiaNIM": [
+            "meta/llama-3.3-70b-instruct",
+            "nvidia/nemotron-3-super-120b-a12b",
+            "moonshotai/kimi-k2-instruct",
+            "mistralai/mistral-large-2-instruct"
+        ],
+        "openRouter": [
+            "nvidia/nemotron-3-ultra-550b-a55b:free",
+            "inclusionai/ling-3.0-flash:free",
+            "qwen/qwen3-coder:free",
+            "nvidia/nemotron-3-super-120b-a12b:free",
+            "google/gemma-4-31b-it:free",
+            "openai/gpt-oss-20b:free",
+            "meta-llama/llama-3.3-70b-instruct:free"
+        ],
+        "sambaNova": [
+            "Meta-Llama-3.3-70B-Instruct",
+            "gpt-oss-120b",
+            "DeepSeek-V3.2",
+            "DeepSeek-V3.1",
+            "gemma-4-31B-it"
+        ],
+        "siliconFlow": [
+            "Qwen/Qwen3-8B",
+            "Qwen/Qwen2.5-7B-Instruct",
+            "meta-llama/Meta-Llama-3.1-8B-Instruct",
+            "Qwen/Qwen3-32B",
+            "deepseek-ai/DeepSeek-V3.1"
+        ],
+        "vercel": [
+            "anthropic/claude-sonnet-4.5",
+            "anthropic/claude-haiku-4.5",
+            "openai/gpt-5.6-luna",
+            "google/gemini-2.5-flash",
+            "openai/gpt-5.6-terra"
+        ],
+        "zai": [
+            "glm-4.7-flash",
+            "glm-4.5-flash",
+            "glm-4.7",
+            "glm-4.6",
+            "glm-4.5-air"
+        ]
+    ]
+}
+
+/// MARK: MODEL_CATALOG_DEFAULTS_END
+
+/// Thread-safe snapshot of the live model catalog.
+///
+/// Why this exists: the app died because a provider shut a model down and the
+/// hardcoded ID kept 404ing. `chat(...)` runs on the MainActor but the request
+/// code does not, so this keeps a lock-guarded copy that any context can read.
+/// It starts from the compiled-in defaults and is refreshed by
+/// `RemoteModelConfigService.fetch()`, so a newly retired model can be handled
+/// by editing remote_models.json alone — no new IPA.
+final class ModelCatalog: @unchecked Sendable {
+    static let shared = ModelCatalog()
+    private let lock = NSLock()
+    private var globalDeprecated: [String: String] = ModelCatalogDefaults.globalDeprecated
+    private var retiredByProvider: [String: [String: String]] = ModelCatalogDefaults.retiredByProvider
+    private var chains: [String: [String]] = ModelCatalogDefaults.chains
+
+    private init() {}
+
+    /// Called from the MainActor after a successful remote config fetch.
+    func update(from config: RemoteModelConfig) {
+        lock.lock()
+        defer { lock.unlock() }
+        // A payload without the v3.0 fields must not wipe the compiled-in tables.
+        globalDeprecated = config.deprecated ?? ModelCatalogDefaults.globalDeprecated
+        var retired = ModelCatalogDefaults.retiredByProvider
+        var chainMap = ModelCatalogDefaults.chains
+        for (name, cfg) in config.providers {
+            if let models = cfg.retiredModels, !models.isEmpty { retired[name] = models }
+            if let chain = cfg.fallbackChain, !chain.isEmpty { chainMap[name] = chain }
+        }
+        retiredByProvider = retired
+        chains = chainMap
+    }
+
+    /// Maps a retired model ID to its live replacement, or returns it unchanged.
+    func liveModel(for provider: ProviderID, requested: String) -> String {
+        lock.lock()
+        let global = globalDeprecated
+        let scoped = retiredByProvider[provider.rawValue] ?? [:]
+        lock.unlock()
+        if let replacement = scoped[requested] { return replacement }
+        if let replacement = global[requested] { return replacement }
+        return requested
+    }
+
+    /// Ordered models to try: the requested one first (after deprecation rewrite),
+    /// then the rest of the provider's chain. Never empty when the chain is known.
+    func candidates(for provider: ProviderID, startingAt requested: String) -> [String] {
+        let start = liveModel(for: provider, requested: requested)
+        lock.lock()
+        let chain = chains[provider.rawValue] ?? []
+        lock.unlock()
+        var ordered: [String] = [start]
+        for model in chain where !ordered.contains(model) { ordered.append(model) }
+        return ordered
+    }
+
+    /// True when a failure means "that model does not exist", as opposed to an
+    /// auth, quota, or transient problem — only then is retrying another model
+    /// useful.
+    static func looksLikeMissingModel(status: Int?, message: String) -> Bool {
+        if status == 404 { return true }
+        let folded = message.lowercased()
+        let markers = [
+            "model_not_found", "model not found", "does not exist", "not exist",
+            "unknown model", "invalid model", "unsupported model", "no such model",
+            "is not supported", "model is not available", "unavailable model",
+            "invalid_request_error"
+        ]
+        // 400/422 with a model complaint is the common shape on OpenAI-compatible gateways.
+        guard status == 400 || status == 422 || status == nil else { return false }
+        return markers.contains(where: folded.contains) && folded.contains("model")
     }
 }
 
@@ -1557,6 +2328,13 @@ struct RemoteProviderConfig: Codable {
     
     func refreshModels(provider: ProviderID, key: String, settings: AppSettings) async {
         guard provider != .auto else { return }
+        // A retired provider has an empty base URL; probing it would surface a
+        // confusing "unsupported URL" instead of the real reason.
+        if provider.isRetired {
+            states[provider]?.status = .offline
+            states[provider]?.lastError = "Retired — no public inference API"
+            return
+        }
         loading.insert(provider)
         defer { loading.remove(provider) }
         var base = settings.baseURL(for: provider).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -2601,7 +3379,7 @@ struct WebProjectRevision: Identifiable, Codable, Equatable {
 actor CloudflarePagesService {
     static let shared = CloudflarePagesService()
     private let apiRoot = URL(string: "https://api.cloudflare.com/client/v4/")!
-    private let userAgent = "AIHub/2.1.0 (iOS)"
+    private let userAgent = "AIHub/3.0.0 (iOS)"
 
     func testPermissions(accountID: String, token: String) async -> KeyCheckState {
         let account = accountID.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -4034,7 +4812,7 @@ actor LiveCurrencyService {
         request.timeoutInterval = 30
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("AIHub/2.1.0 (iOS)", forHTTPHeaderField: "User-Agent")
+        request.setValue("AIHub/3.0.0 (iOS)", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             throw ServiceError("Frankfurter live rates are temporarily unavailable.", statusCode: (response as? HTTPURLResponse)?.statusCode, kind: .transient)
@@ -4059,7 +4837,7 @@ actor LiveCurrencyService {
         request.timeoutInterval = 30
         request.cachePolicy = .returnCacheDataElseLoad
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("AIHub/2.1.0 (iOS)", forHTTPHeaderField: "User-Agent")
+        request.setValue("AIHub/3.0.0 (iOS)", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
               let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
@@ -4828,24 +5606,28 @@ final class AIService {
             return (UserDefaults.standard.object(forKey: "providerEnabled_\(provider.rawValue)") as? Bool) ?? true
         }
         func filtered(_ list: [ProviderID]) -> [ProviderID] {
-            let enabled = list.filter(liveEnabled)
-            return enabled.isEmpty ? list : enabled
+            // Retired providers are dropped here rather than in each list, so removing a
+            // provider later is a one-line change to ProviderID.isRetired.
+            let usable = list.filter { !$0.isRetired }
+            let enabled = usable.filter(liveEnabled)
+            return enabled.isEmpty ? usable : enabled
         }
         if outputMode == .web {
             // Web work prioritizes long-context coding models; the web-specific health score learns independently.
-            return filtered([.vercel, .gemini, .openRouter, .zai, .custom, .mistral, .sambaNova, .siliconFlow, .cloudflare, .groq, .cerebras, .deepseek, .nvidiaNIM, .antigravity])
+            return filtered([.vercel, .apinex, .githubModels, .gemini, .openRouter, .zai, .custom, .mistral, .sambaNova, .siliconFlow, .cloudflare, .groq, .cerebras, .deepseek, .nvidiaNIM])
         }
         if hasVisual || isDocument {
-            // Native PDF and real vision providers lead; text-only providers remain late OCR/text fallbacks.
-            return filtered([.gemini, .vercel, .zai, .cloudflare, .openRouter, .mistral, .sambaNova, .custom, .groq, .siliconFlow, .cerebras, .deepseek, .nvidiaNIM, .antigravity])
+            // Native PDF and real vision providers lead; text-only providers (APInex, Groq)
+            // stay late as OCR/text fallbacks rather than receiving image parts.
+            return filtered([.gemini, .vercel, .githubModels, .zai, .cloudflare, .openRouter, .mistral, .sambaNova, .custom, .groq, .siliconFlow, .cerebras, .deepseek, .nvidiaNIM, .apinex])
         }
         switch mode {
-        case .fast: return filtered([.groq, .cerebras, .sambaNova, .zai, .gemini, .mistral, .cloudflare, .siliconFlow, .openRouter, .custom, .vercel, .deepseek, .nvidiaNIM])
-        case .smart: return filtered([.gemini, .zai, .sambaNova, .groq, .cerebras, .mistral, .cloudflare, .siliconFlow, .openRouter, .custom, .vercel, .deepseek, .nvidiaNIM, .antigravity])
-        case .deep: return filtered([.vercel, .gemini, .deepseek, .zai, .sambaNova, .mistral, .cloudflare, .openRouter, .groq, .siliconFlow, .custom, .cerebras, .nvidiaNIM, .antigravity])
-        case .research: return filtered([.gemini, .vercel, .deepseek, .zai, .sambaNova, .mistral, .cloudflare, .openRouter, .groq, .siliconFlow, .custom, .cerebras, .nvidiaNIM, .antigravity])
-        case .agent: return filtered([.vercel, .gemini, .deepseek, .zai, .sambaNova, .mistral, .cloudflare, .openRouter, .groq, .siliconFlow, .custom, .cerebras, .nvidiaNIM, .antigravity])
-        case .compare: return filtered([.vercel, .gemini, .deepseek, .zai, .sambaNova, .mistral, .groq, .cloudflare, .openRouter, .siliconFlow, .custom, .cerebras, .nvidiaNIM, .antigravity])
+        case .fast: return filtered([.groq, .apinex, .githubModels, .cerebras, .sambaNova, .zai, .gemini, .mistral, .cloudflare, .siliconFlow, .openRouter, .custom, .vercel, .deepseek, .nvidiaNIM])
+        case .smart: return filtered([.gemini, .apinex, .githubModels, .zai, .sambaNova, .groq, .cerebras, .mistral, .cloudflare, .siliconFlow, .openRouter, .custom, .vercel, .deepseek, .nvidiaNIM])
+        case .deep: return filtered([.vercel, .gemini, .apinex, .githubModels, .deepseek, .zai, .sambaNova, .mistral, .cloudflare, .openRouter, .groq, .siliconFlow, .custom, .cerebras, .nvidiaNIM])
+        case .research: return filtered([.gemini, .vercel, .apinex, .githubModels, .deepseek, .zai, .sambaNova, .mistral, .cloudflare, .openRouter, .groq, .siliconFlow, .custom, .cerebras, .nvidiaNIM])
+        case .agent: return filtered([.vercel, .apinex, .githubModels, .gemini, .deepseek, .zai, .sambaNova, .mistral, .cloudflare, .openRouter, .groq, .siliconFlow, .custom, .cerebras, .nvidiaNIM])
+        case .compare: return filtered([.vercel, .gemini, .apinex, .githubModels, .deepseek, .zai, .sambaNova, .mistral, .groq, .cloudflare, .openRouter, .siliconFlow, .custom, .cerebras, .nvidiaNIM])
         }
     }
 
@@ -4859,10 +5641,12 @@ final class AIService {
         case .zai, .openRouter, .custom: base = 80_000
         case .vercel: base = 120_000
         case .gemini: base = 140_000
-        case .cerebras: base = 60_000   // 1M tokens/day free
-        case .deepseek: base = 100_000  // 128K context, cheap
+        case .apinex: base = 180_000    // every free/* model carries a 1M window
+        case .githubModels: base = 150_000  // gpt-4.1 has a 1M window
+        case .cerebras: base = 60_000
+        case .deepseek: base = 160_000  // V4 Flash/Pro are 1M context
         case .nvidiaNIM: base = 80_000  // 100+ models
-        case .antigravity: base = 120_000  // Agent-based, high context
+        case .antigravity: base = 0     // retired, never routed
         case .auto: base = 30_000
         }
         if provider == .groq { return base }
@@ -4876,10 +5660,12 @@ final class AIService {
         case .cloudflare: base = 18_000
         case .mistral, .siliconFlow, .sambaNova: base = 24_000
         case .gemini, .zai, .vercel, .openRouter, .custom: base = 42_000
+        case .apinex: base = 60_000
+        case .githubModels: base = 50_000
         case .cerebras: base = 30_000
         case .deepseek: base = 50_000
         case .nvidiaNIM: base = 40_000
-        case .antigravity: base = 60_000
+        case .antigravity: base = 0
         case .auto: base = 12_000
         }
         if provider == .groq { return base }
@@ -4895,7 +5681,9 @@ final class AIService {
             case .cerebras: return 8_192
             case .deepseek: return 12_288
             case .nvidiaNIM: return 8_192
-            case .antigravity: return 16_384
+            case .apinex: return 12_288
+            case .githubModels: return 12_288
+            case .antigravity: return 4_096
             case .auto: return 6_144
             }
         }
@@ -4910,7 +5698,9 @@ final class AIService {
         case .cerebras: return (mode == .deep || mode == .research || mode == .agent || mode == .compare) ? 6_144 : 4_096
         case .deepseek: return (mode == .deep || mode == .research || mode == .agent || mode == .compare) ? 8_192 : 6_144
         case .nvidiaNIM: return (mode == .deep || mode == .research || mode == .agent || mode == .compare) ? 6_144 : 4_096
-        case .antigravity: return (mode == .deep || mode == .research || mode == .agent || mode == .compare) ? 12_288 : 8_192
+        case .apinex: return (mode == .deep || mode == .research || mode == .agent || mode == .compare) ? 8_192 : 6_144
+        case .githubModels: return (mode == .deep || mode == .research || mode == .agent || mode == .compare) ? 8_192 : 4_096
+        case .antigravity: return 2_048
         case .auto: return 3_072
         }
     }
@@ -5092,7 +5882,26 @@ final class AIService {
         return folded.split { !$0.isLetter && !$0.isNumber }.map(String.init).filter { $0.count > 2 && !stop.contains($0) }
     }
 
+    /// Gemini has its own transport, so it needs the same model-chain walk that
+    /// openAIChat(_:...) performs. Google renames Flash models often (2.0 -> 2.5 -> 3.x),
+    /// and a stale ID here used to be a hard failure for the whole app.
     private func geminiChat(history: [ChatMessage], prompt: String, attachment: InputAttachment?, key: String, model: String, systemPrompt: String, maxOutputTokens: Int) async throws -> String {
+        let candidates = ModelCatalog.shared.candidates(for: .gemini, startingAt: model)
+        var lastError: Error?
+        for (index, candidate) in candidates.enumerated() {
+            do {
+                return try await geminiChatOnce(history: history, prompt: prompt, attachment: attachment, key: key, model: candidate, systemPrompt: systemPrompt, maxOutputTokens: maxOutputTokens)
+            } catch let error as ServiceError
+                where ModelCatalog.looksLikeMissingModel(status: error.statusCode, message: error.localizedDescription)
+                    && index < candidates.count - 1 {
+                lastError = error
+                continue
+            }
+        }
+        throw lastError ?? ServiceError("Gemini has no usable model configured", kind: .unsupported)
+    }
+
+    private func geminiChatOnce(history: [ChatMessage], prompt: String, attachment: InputAttachment?, key: String, model: String, systemPrompt: String, maxOutputTokens: Int) async throws -> String {
         guard let encodedModel = model.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
               let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(encodedModel):generateContent") else {
             throw ServiceError("Invalid Gemini model ID", kind: .configuration)
@@ -5206,17 +6015,42 @@ final class AIService {
     /// Suggests an alternative provider when the current one is overloaded
     private func suggestAlternativeProvider(for provider: ProviderID) -> String {
         switch provider {
-        case .groq: return "Cerebras or DeepSeek"
-        case .gemini: return "DeepSeek or NVIDIA NIM"
-        case .cerebras: return "Groq or DeepSeek"
-        case .deepseek: return "Cerebras or Gemini"
-        case .nvidiaNIM: return "DeepSeek or Gemini"
-        case .antigravity: return "Gemini or DeepSeek"
-        default: return "Groq or Cerebras"
+        case .groq: return "APInex or Gemini"
+        case .gemini: return "APInex or DeepSeek"
+        case .cerebras: return "APInex or Groq"
+        case .deepseek: return "APInex or Gemini"
+        case .nvidiaNIM: return "APInex or Gemini"
+        case .apinex: return "Gemini or GitHub Models"
+        case .githubModels: return "APInex or Gemini"
+        case .antigravity: return "APInex — Antigravity is retired"
+        default: return "APInex or Groq"
         }
     }
 
+    /// Walks the provider's model chain. A provider that retires a model ID
+    /// (Groq did this to llama-3.3-70b-versatile, DeepSeek to deepseek-chat) used
+    /// to fail the whole request; now the next live model in the chain is tried.
     private func openAIChat(history: [ChatMessage], prompt: String, attachment: InputAttachment?, provider: ProviderID, key: String, model: String, baseURL: String, systemPrompt: String, maxOutputTokens: Int, onPartial: ((String) -> Void)? = nil) async throws -> String {
+        guard provider != .custom else {
+            // A user-supplied base URL gets no rewriting — they asked for that exact model.
+            return try await openAIChatOnce(history: history, prompt: prompt, attachment: attachment, provider: provider, key: key, model: model, baseURL: baseURL, systemPrompt: systemPrompt, maxOutputTokens: maxOutputTokens, onPartial: onPartial)
+        }
+        let candidates = ModelCatalog.shared.candidates(for: provider, startingAt: model)
+        var lastError: Error?
+        for (index, candidate) in candidates.enumerated() {
+            do {
+                return try await openAIChatOnce(history: history, prompt: prompt, attachment: attachment, provider: provider, key: key, model: candidate, baseURL: baseURL, systemPrompt: systemPrompt, maxOutputTokens: maxOutputTokens, onPartial: onPartial)
+            } catch let error as ServiceError
+                where ModelCatalog.looksLikeMissingModel(status: error.statusCode, message: error.localizedDescription)
+                    && index < candidates.count - 1 {
+                lastError = error
+                continue
+            }
+        }
+        throw lastError ?? ServiceError("\(provider.shortTitle) has no usable model configured", kind: .unsupported)
+    }
+
+    private func openAIChatOnce(history: [ChatMessage], prompt: String, attachment: InputAttachment?, provider: ProviderID, key: String, model: String, baseURL: String, systemPrompt: String, maxOutputTokens: Int, onPartial: ((String) -> Void)? = nil) async throws -> String {
         let trimmed = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let endpoint = trimmed.hasSuffix("chat/completions") ? trimmed : trimmed + "/chat/completions"
         guard let url = URL(string: endpoint), url.scheme?.lowercased() == "https", url.host != nil else {
@@ -5396,6 +6230,8 @@ final class AIService {
             return visualMarkers.contains(where: value.contains)
         case .cerebras, .deepseek, .nvidiaNIM, .antigravity:
             return visualMarkers.contains(where: value.contains)
+        case .apinex: return false  // the free/* catalogue is text-only
+        case .githubModels: return visualMarkers.contains(where: value.contains)
         case .auto, .gemini: return false
         }
     }
@@ -5617,7 +6453,7 @@ final class KeyValidationService {
         case .cloudflare:
             let account = settings.cloudflareAccountID.trimmingCharacters(in: .whitespacesAndNewlines)
             endpoint = "https://api.cloudflare.com/client/v4/accounts/\(account)/ai/models/search?per_page=1"
-        case .groq, .zai, .mistral, .vercel, .sambaNova, .siliconFlow, .custom,
+        case .apinex, .githubModels, .groq, .zai, .mistral, .vercel, .sambaNova, .siliconFlow, .custom,
              .cerebras, .deepseek, .nvidiaNIM, .antigravity:
             var base = settings.baseURL(for: provider).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
             if base.hasSuffix("/chat/completions") { base = String(base.dropLast("/chat/completions".count)) }
@@ -5638,6 +6474,12 @@ final class KeyValidationService {
             guard let http = response as? HTTPURLResponse else { return .invalid("No HTTP response") }
             if (200...299).contains(http.statusCode) { return .valid("Accepted • HTTP \(http.statusCode)") }
             if http.statusCode == 429 { return .valid("Accepted • rate limited") }
+            // A gateway that simply does not implement /models is not evidence of a
+            // bad key. Reporting one here would tell the user to replace a working
+            // credential, so treat "no such endpoint" as accepted.
+            if http.statusCode == 404 || http.statusCode == 405 {
+                return .valid("Accepted • no model list endpoint")
+            }
             return .invalid(apiError(data) ?? "Rejected • HTTP \(http.statusCode)")
         } catch { return .invalid(error.localizedDescription) }
     }
@@ -5712,6 +6554,12 @@ final class ImageAIService {
                 return SmartImageResult(image: image, provider: "Pollinations", usageLabel: "pollinations")
             } catch { failures.append("Pollinations: \(error.localizedDescription)") }
         }
+        // No Cloudflare token and no Pollinations key: still return an image
+        // instead of an error, via the anonymous legacy endpoint.
+        do {
+            let image = try await generatePollinationsAnonymous(prompt: prompt)
+            return SmartImageResult(image: image, provider: "Pollinations (anonymous)", usageLabel: "pollinations")
+        } catch { failures.append("Pollinations anonymous: \(error.localizedDescription)") }
         throw smartFailure(failures, operation: "generation")
     }
 
@@ -5773,7 +6621,7 @@ final class ImageAIService {
     private func smartFailure(_ failures: [String], operation: String) -> ServiceError {
         guard !failures.isEmpty else {
             return ServiceError(
-                "No image provider is configured. Add a Cloudflare token + Account ID or a funded Pollinations sk_ key in Settings.",
+                "No image provider answered. For the best results add a Cloudflare token + Account ID (free, 10,000 Neurons/day) or a Pollinations key from enter.pollinations.ai in Settings.",
                 kind: .configuration
             )
         }
@@ -5912,6 +6760,43 @@ final class ImageAIService {
     }
 
     // MARK: Pollinations fallback
+
+    /// Keyless last resort.
+    ///
+    /// `gen.pollinations.ai/v1/images/*` now requires an API key from
+    /// enter.pollinations.ai, so a user with no key used to get nothing at all.
+    /// The legacy `image.pollinations.ai/prompt/{prompt}` GET endpoint is still
+    /// open to anonymous callers — throttled to roughly one request per 15
+    /// seconds and it may carry a watermark, but it returns a real JPEG.
+    private func generatePollinationsAnonymous(prompt: String) async throws -> UIImage {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/?#[]@!$&'()*+,;=")
+        guard let encoded = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                .addingPercentEncoding(withAllowedCharacters: allowed),
+              !encoded.isEmpty,
+              let url = URL(string: "https://image.pollinations.ai/prompt/\(encoded)?width=1024&height=1024&nologo=true&safe=true") else {
+            throw ServiceError("Invalid Pollinations anonymous request", kind: .configuration)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 300
+        request.setValue("image/*", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw ServiceError("No image response", kind: .transient)
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw ServiceError(
+                parsePollinationsError(data) ?? "Pollinations anonymous request failed",
+                statusCode: http.statusCode,
+                kind: http.statusCode == 429 ? .quota : .provider
+            )
+        }
+        guard let image = UIImage(data: data) else {
+            throw ServiceError("Pollinations returned data that is not a decodable image", kind: .provider)
+        }
+        return image
+    }
 
     private func generatePollinations(prompt: String, model: String, apiKey: String) async throws -> UIImage {
         guard let url = URL(string: "https://gen.pollinations.ai/v1/images/generations") else {
@@ -9625,6 +10510,8 @@ struct ProviderControlCenterView: View {
                     case .siliconFlow: settings.siliconModel = new
                     case .cerebras: settings.cerebrasModel = new
                     case .deepseek: settings.deepseekModel = new
+                    case .apinex: settings.apinexModel = new
+                    case .githubModels: settings.githubModelsModel = new
                     case .nvidiaNIM: settings.nvidiaNIMModel = new
                     case .antigravity: settings.antigravityModel = new
                     case .custom: settings.customModel = new
@@ -9701,6 +10588,8 @@ struct ProviderControlCenterView: View {
                                         case .siliconFlow: settings.siliconModel = model
                                         case .cerebras: settings.cerebrasModel = model
                                         case .deepseek: settings.deepseekModel = model
+                                        case .apinex: settings.apinexModel = model
+                                        case .githubModels: settings.githubModelsModel = model
                                         case .nvidiaNIM: settings.nvidiaNIMModel = model
                                         case .antigravity: settings.antigravityModel = model
                                         case .custom: settings.customModel = model
@@ -9758,10 +10647,12 @@ struct ProviderControlCenterView: View {
         case .zai, .cloudflare, .openRouter: return "Text • vision • Auto fallback • live refresh"
         case .groq: return "Very fast • conservative budgets • live health"
         case .mistral, .siliconFlow: return "OpenAI-compatible • vision when supported • live"
-        case .cerebras: return "1M tok/day free • ultra fast • live"
-        case .deepseek: return "Reasoning • cheap • live"
+        case .apinex: return "8 free models • 1M context each • one key • live catalog"
+        case .githubModels: return "Free GPT-4.1 / GPT-4o • 1M context • uses your GitHub token"
+        case .cerebras: return "Card required since Aug 2026 • ultra fast • live"
+        case .deepseek: return "V4 Flash/Pro • 1M context • cheap • live"
         case .nvidiaNIM: return "100+ models • live catalog"
-        case .antigravity: return "Agent-based coding • live"
+        case .antigravity: return "Retired — no public API. Use APInex or Gemini."
         case .custom: return "Custom OpenAI API • live health"
         case .auto: return "Auto fallback across all live modules"
         }
@@ -9903,6 +10794,8 @@ struct SettingsView: View {
     @EnvironmentObject private var liveStore: ProviderLiveModuleStore
     @EnvironmentObject private var remoteConfig: RemoteModelConfigService
     @ObservedObject private var router = ProviderPerformanceStore.shared
+    @State private var apinexKey = ""
+    @State private var githubModelsKey = ""
     @State private var geminiKey = ""
     @State private var groqKey = ""
     @State private var zaiKey = ""
@@ -9913,6 +10806,9 @@ struct SettingsView: View {
     @State private var sambaNovaKey = ""
     @State private var openRouterKey = ""
     @State private var siliconKey = ""
+    @State private var cerebrasKey = ""
+    @State private var deepseekKey = ""
+    @State private var nvidiaKey = ""
     @State private var customKey = ""
     @State private var pollinationsKey = ""
     @State private var tavilyKey = ""
@@ -9943,18 +10839,16 @@ struct SettingsView: View {
             }
         }
         .onAppear {
-            loadKeys()
-            if !vercelKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Task {
-                    await vercelCredits.refresh(key: vercelKey)
-                    await modelCatalog.refresh(provider: .vercel, key: vercelKey, settings: settings)
+            // Reading a stored key is a synchronous SecItemCopyMatching round trip to
+            // securityd. Doing sixteen of them on the main actor while the tab animates
+            // in stalls the first frames, and the first keychain call after launch is by
+            // far the slowest of the lot. Load them off-main and assign back.
+            Task.detached(priority: .userInitiated) {
+                let snapshot = KeySnapshot.load()
+                await MainActor.run {
+                    applyKeySnapshot(snapshot)
+                    startDeferredRefreshes(snapshot)
                 }
-            }
-            if !sambaNovaKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Task { await modelCatalog.refresh(provider: .sambaNova, key: sambaNovaKey, settings: settings) }
-            }
-            if settings.mcpEnabled, !settings.mcpServerURL.isEmpty {
-                Task { await mcpCatalog.refresh(url: settings.mcpServerURL, token: mcpToken) }
             }
         }
         .onChange(of: geminiKey) { _ in checks[.gemini] = .unknown }
@@ -9968,6 +10862,9 @@ struct SettingsView: View {
         .onChange(of: settings.cloudflareAccountID) { _ in checks[.cloudflare] = .unknown; cloudflarePagesCheck = .unknown }
         .onChange(of: openRouterKey) { _ in checks[.openRouter] = .unknown }
         .onChange(of: siliconKey) { _ in checks[.siliconFlow] = .unknown }
+        .onChange(of: deepseekKey) { _ in checks[.deepseek] = .unknown }
+        .onChange(of: cerebrasKey) { _ in checks[.cerebras] = .unknown }
+        .onChange(of: nvidiaKey) { _ in checks[.nvidiaNIM] = .unknown }
         .onChange(of: customKey) { _ in checks[.custom] = .unknown }
         .onChange(of: pollinationsKey) { _ in pollinationsCheck = .unknown }
         .onChange(of: tavilyKey) { _ in tavilyCheck = .unknown }
@@ -9982,8 +10879,38 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var gatewaySettingsSections: some View {
+        apinexSettingsSection
+        githubModelsSettingsSection
         vercelSettingsSection
         sambaNovaSettingsSection
+    }
+
+    private var githubModelsSettingsSection: some View {
+        Section("GitHub Models — free frontier models, no card") {
+            SecureField("GitHub token (classic or fine-grained)", text: $githubModelsKey).textInputAutocapitalization(.never).autocorrectionDisabled().focused($settingsInputFocused)
+            TextField("Model ID", text: $settings.githubModelsModel).textInputAutocapitalization(.never).autocorrectionDisabled().focused($settingsInputFocused)
+            Stepper(value: $settings.githubModelsDailyLimit, in: 1...20000, step: 5) { Text("Local daily limit: \(settings.githubModelsDailyLimit)") }
+            LabeledContent("Used today", value: "\(usage.byProvider[ProviderID.githubModels.rawValue] ?? 0)")
+            HStack { KeyStatusBadge(state: state(.githubModels)); Spacer(); Button("Test key") { test(.githubModels, key: githubModelsKey) }.disabled(state(.githubModels) == .checking) }
+            Text("Permanently free and OpenAI-compatible at https://models.inference.ai.azure.com. Paste any GitHub personal access token — a fine-grained token needs no extra scopes for inference. gpt-4.1 carries a 1M-token context window; gpt-4.1-mini has the most generous allowance at 15 RPM / 150 requests per day.")
+                .font(.caption).foregroundStyle(.secondary)
+            Link(destination: URL(string: "https://github.com/settings/tokens")!) { Label("Create a GitHub token", systemImage: "arrow.up.right.square") }
+            Link(destination: URL(string: "https://github.com/marketplace/models")!) { Label("Browse the model catalog", systemImage: "arrow.up.right.square") }
+        }
+    }
+
+    private var apinexSettingsSection: some View {
+        Section("APInex — one key, 8 free models, 1M context") {
+            SecureField("API key (sk-apx…)", text: $apinexKey).textInputAutocapitalization(.never).autocorrectionDisabled().focused($settingsInputFocused)
+            TextField("Model ID", text: $settings.apinexModel).textInputAutocapitalization(.never).autocorrectionDisabled().focused($settingsInputFocused)
+            Stepper(value: $settings.apinexDailyLimit, in: 1...20000, step: 25) { Text("Local daily limit: \(settings.apinexDailyLimit)") }
+            LabeledContent("Used today", value: "\(usage.byProvider[ProviderID.apinex.rawValue] ?? 0)")
+            HStack { KeyStatusBadge(state: state(.apinex)); Spacer(); Button("Test key") { test(.apinex, key: apinexKey) }.disabled(state(.apinex) == .checking) }
+            Text("OpenAI-compatible gateway at https://api.apinex.bond/v1. Model IDs starting with free/ cost nothing — free/gemini-3.8-flash, free/qwen-3.8-max, free/glm-5.3-flash, free/deepseek-v4-flash-0731, free/gpt-5.6-luna, free/gemini-3.1-pro, free/deepseek-v4-pro-0813, free/muse-spark-1.3. Every one has a 1M-token context window.")
+                .font(.caption).foregroundStyle(.secondary)
+            Link(destination: URL(string: "https://apinex.bond/register")!) { Label("Create an APInex key", systemImage: "arrow.up.right.square") }
+            Link(destination: URL(string: "https://apinex.bond/models")!) { Label("Live model list and pricing", systemImage: "arrow.up.right.square") }
+        }
     }
 
     @ViewBuilder
@@ -10110,6 +11037,9 @@ struct SettingsView: View {
     private var alternativeProviderSections: some View {
         providerSection(provider: .openRouter, title: "OpenRouter Free", key: $openRouterKey, model: $settings.openRouterModel, limit: $settings.openRouterDailyLimit)
         providerSection(provider: .siliconFlow, title: "SiliconFlow", key: $siliconKey, model: $settings.siliconModel, limit: $settings.siliconDailyLimit)
+        providerSection(provider: .deepseek, title: "DeepSeek — V4 Flash / Pro, 1M context", key: $deepseekKey, model: $settings.deepseekModel, limit: $settings.deepseekDailyLimit)
+        providerSection(provider: .cerebras, title: "Cerebras — fastest inference (card required since Aug 2026)", key: $cerebrasKey, model: $settings.cerebrasModel, limit: $settings.cerebrasDailyLimit)
+        providerSection(provider: .nvidiaNIM, title: "NVIDIA NIM — 100+ hosted models", key: $nvidiaKey, model: $settings.nvidiaNIMModel, limit: $settings.nvidiaNIMDailyLimit)
     }
 
     private var pollinationsSettingsSection: some View {
@@ -10298,19 +11228,66 @@ struct SettingsView: View {
     }
 
     private func state(_ provider: ProviderID) -> KeyCheckState { checks[provider] ?? .unknown }
-    private func loadKeys() {
-        geminiKey = settings.key(for: .gemini); groqKey = settings.key(for: .groq); zaiKey = settings.key(for: .zai)
-        mistralKey = settings.key(for: .mistral); cloudflareKey = settings.key(for: .cloudflare); cloudflarePagesKey = settings.cloudflarePagesToken
-        vercelKey = settings.key(for: .vercel); sambaNovaKey = settings.key(for: .sambaNova); openRouterKey = settings.key(for: .openRouter)
-        siliconKey = settings.key(for: .siliconFlow); customKey = settings.key(for: .custom); pollinationsKey = settings.pollinationsKey
-        tavilyKey = settings.tavilyKey
-        mcpToken = settings.mcpToken
+    /// Every stored credential this screen shows. `KeychainStore.read` is
+    /// nonisolated, so the whole snapshot can be built off the main actor.
+    private struct KeySnapshot {
+        var values: [String: String] = [:]
+        static func load() -> KeySnapshot {
+            var snapshot = KeySnapshot()
+            for provider in ProviderID.allCases where provider != .auto {
+                snapshot.values[provider.rawValue] = KeychainStore.read(provider.rawValue)
+            }
+            snapshot.values["cloudflarePages"] = KeychainStore.read("cloudflarePages")
+            snapshot.values["pollinations"] = KeychainStore.read("pollinations")
+            snapshot.values["tavily"] = KeychainStore.read("tavily")
+            snapshot.values["remoteMCP"] = KeychainStore.read("remoteMCP")
+            return snapshot
+        }
+        func value(_ account: String) -> String { values[account] ?? "" }
+        func value(_ provider: ProviderID) -> String { values[provider.rawValue] ?? "" }
     }
+
+    private func applyKeySnapshot(_ snapshot: KeySnapshot) {
+        apinexKey = snapshot.value(.apinex); githubModelsKey = snapshot.value(.githubModels)
+        geminiKey = snapshot.value(.gemini); groqKey = snapshot.value(.groq); zaiKey = snapshot.value(.zai)
+        mistralKey = snapshot.value(.mistral); cloudflareKey = snapshot.value(.cloudflare)
+        cloudflarePagesKey = snapshot.value("cloudflarePages")
+        vercelKey = snapshot.value(.vercel); sambaNovaKey = snapshot.value(.sambaNova)
+        openRouterKey = snapshot.value(.openRouter); siliconKey = snapshot.value(.siliconFlow)
+        cerebrasKey = snapshot.value(.cerebras); deepseekKey = snapshot.value(.deepseek)
+        nvidiaKey = snapshot.value(.nvidiaNIM); customKey = snapshot.value(.custom)
+        pollinationsKey = snapshot.value("pollinations"); tavilyKey = snapshot.value("tavily")
+        mcpToken = snapshot.value("remoteMCP")
+    }
+
+    /// The credit/quota/MCP refreshes that used to run synchronously after loadKeys().
+    /// They now read the freshly loaded snapshot rather than @State, which is not
+    /// written yet at the moment the detached task returns.
+    private func startDeferredRefreshes(_ snapshot: KeySnapshot) {
+        let vercel = snapshot.value(.vercel).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !vercel.isEmpty {
+            Task {
+                await vercelCredits.refresh(key: vercel)
+                await modelCatalog.refresh(provider: .vercel, key: vercel, settings: settings)
+            }
+        }
+        let samba = snapshot.value(.sambaNova).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !samba.isEmpty {
+            Task { await modelCatalog.refresh(provider: .sambaNova, key: samba, settings: settings) }
+        }
+        if settings.mcpEnabled, !settings.mcpServerURL.isEmpty {
+            let token = snapshot.value("remoteMCP")
+            Task { await mcpCatalog.refresh(url: settings.mcpServerURL, token: token) }
+        }
+    }
+
     private func saveKeys() throws {
+        try settings.setKey(apinexKey, for: .apinex); try settings.setKey(githubModelsKey, for: .githubModels)
         try settings.setKey(geminiKey, for: .gemini); try settings.setKey(groqKey, for: .groq); try settings.setKey(zaiKey, for: .zai)
         try settings.setKey(mistralKey, for: .mistral); try settings.setKey(cloudflareKey, for: .cloudflare)
         try settings.setKey(vercelKey, for: .vercel); try settings.setKey(sambaNovaKey, for: .sambaNova); try settings.setKey(openRouterKey, for: .openRouter)
         try settings.setKey(siliconKey, for: .siliconFlow); try settings.setKey(customKey, for: .custom); try settings.setPollinationsKey(pollinationsKey)
+        try settings.setKey(deepseekKey, for: .deepseek); try settings.setKey(cerebrasKey, for: .cerebras); try settings.setKey(nvidiaKey, for: .nvidiaNIM)
         try settings.setTavilyKey(tavilyKey); try settings.setCloudflarePagesToken(cloudflarePagesKey); try settings.setMCPToken(mcpToken)
     }
     private func testCloudflarePages() {
@@ -10364,9 +11341,12 @@ struct SettingsView: View {
         do { try saveKeys() } catch { present(error.localizedDescription); return }
         isTestingAll = true; saved = false
         let providers: [(ProviderID, String)] = [
+            (.apinex, apinexKey), (.githubModels, githubModelsKey),
             (.gemini, geminiKey), (.groq, groqKey), (.zai, zaiKey), (.mistral, mistralKey),
             (.cloudflare, cloudflareKey), (.vercel, vercelKey), (.sambaNova, sambaNovaKey),
-            (.openRouter, openRouterKey), (.siliconFlow, siliconKey), (.custom, customKey)
+            (.openRouter, openRouterKey), (.siliconFlow, siliconKey),
+            (.deepseek, deepseekKey), (.cerebras, cerebrasKey), (.nvidiaNIM, nvidiaKey),
+            (.custom, customKey)
         ]
         for (provider, _) in providers { checks[provider] = .checking }
         pollinationsCheck = KeyValidationService.shared.validatePollinationsFormat(key: pollinationsKey)
