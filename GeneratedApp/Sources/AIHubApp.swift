@@ -10806,6 +10806,9 @@ struct SettingsView: View {
     @State private var sambaNovaKey = ""
     @State private var openRouterKey = ""
     @State private var siliconKey = ""
+    @State private var cerebrasKey = ""
+    @State private var deepseekKey = ""
+    @State private var nvidiaKey = ""
     @State private var customKey = ""
     @State private var pollinationsKey = ""
     @State private var tavilyKey = ""
@@ -10836,18 +10839,16 @@ struct SettingsView: View {
             }
         }
         .onAppear {
-            loadKeys()
-            if !vercelKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Task {
-                    await vercelCredits.refresh(key: vercelKey)
-                    await modelCatalog.refresh(provider: .vercel, key: vercelKey, settings: settings)
+            // Reading a stored key is a synchronous SecItemCopyMatching round trip to
+            // securityd. Doing sixteen of them on the main actor while the tab animates
+            // in stalls the first frames, and the first keychain call after launch is by
+            // far the slowest of the lot. Load them off-main and assign back.
+            Task.detached(priority: .userInitiated) {
+                let snapshot = KeySnapshot.load()
+                await MainActor.run {
+                    applyKeySnapshot(snapshot)
+                    startDeferredRefreshes(snapshot)
                 }
-            }
-            if !sambaNovaKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Task { await modelCatalog.refresh(provider: .sambaNova, key: sambaNovaKey, settings: settings) }
-            }
-            if settings.mcpEnabled, !settings.mcpServerURL.isEmpty {
-                Task { await mcpCatalog.refresh(url: settings.mcpServerURL, token: mcpToken) }
             }
         }
         .onChange(of: geminiKey) { _ in checks[.gemini] = .unknown }
@@ -10861,6 +10862,9 @@ struct SettingsView: View {
         .onChange(of: settings.cloudflareAccountID) { _ in checks[.cloudflare] = .unknown; cloudflarePagesCheck = .unknown }
         .onChange(of: openRouterKey) { _ in checks[.openRouter] = .unknown }
         .onChange(of: siliconKey) { _ in checks[.siliconFlow] = .unknown }
+        .onChange(of: deepseekKey) { _ in checks[.deepseek] = .unknown }
+        .onChange(of: cerebrasKey) { _ in checks[.cerebras] = .unknown }
+        .onChange(of: nvidiaKey) { _ in checks[.nvidiaNIM] = .unknown }
         .onChange(of: customKey) { _ in checks[.custom] = .unknown }
         .onChange(of: pollinationsKey) { _ in pollinationsCheck = .unknown }
         .onChange(of: tavilyKey) { _ in tavilyCheck = .unknown }
@@ -11033,6 +11037,9 @@ struct SettingsView: View {
     private var alternativeProviderSections: some View {
         providerSection(provider: .openRouter, title: "OpenRouter Free", key: $openRouterKey, model: $settings.openRouterModel, limit: $settings.openRouterDailyLimit)
         providerSection(provider: .siliconFlow, title: "SiliconFlow", key: $siliconKey, model: $settings.siliconModel, limit: $settings.siliconDailyLimit)
+        providerSection(provider: .deepseek, title: "DeepSeek — V4 Flash / Pro, 1M context", key: $deepseekKey, model: $settings.deepseekModel, limit: $settings.deepseekDailyLimit)
+        providerSection(provider: .cerebras, title: "Cerebras — fastest inference (card required since Aug 2026)", key: $cerebrasKey, model: $settings.cerebrasModel, limit: $settings.cerebrasDailyLimit)
+        providerSection(provider: .nvidiaNIM, title: "NVIDIA NIM — 100+ hosted models", key: $nvidiaKey, model: $settings.nvidiaNIMModel, limit: $settings.nvidiaNIMDailyLimit)
     }
 
     private var pollinationsSettingsSection: some View {
@@ -11221,21 +11228,66 @@ struct SettingsView: View {
     }
 
     private func state(_ provider: ProviderID) -> KeyCheckState { checks[provider] ?? .unknown }
-    private func loadKeys() {
-        apinexKey = settings.key(for: .apinex); githubModelsKey = settings.key(for: .githubModels)
-        geminiKey = settings.key(for: .gemini); groqKey = settings.key(for: .groq); zaiKey = settings.key(for: .zai)
-        mistralKey = settings.key(for: .mistral); cloudflareKey = settings.key(for: .cloudflare); cloudflarePagesKey = settings.cloudflarePagesToken
-        vercelKey = settings.key(for: .vercel); sambaNovaKey = settings.key(for: .sambaNova); openRouterKey = settings.key(for: .openRouter)
-        siliconKey = settings.key(for: .siliconFlow); customKey = settings.key(for: .custom); pollinationsKey = settings.pollinationsKey
-        tavilyKey = settings.tavilyKey
-        mcpToken = settings.mcpToken
+    /// Every stored credential this screen shows. `KeychainStore.read` is
+    /// nonisolated, so the whole snapshot can be built off the main actor.
+    private struct KeySnapshot {
+        var values: [String: String] = [:]
+        static func load() -> KeySnapshot {
+            var snapshot = KeySnapshot()
+            for provider in ProviderID.allCases where provider != .auto {
+                snapshot.values[provider.rawValue] = KeychainStore.read(provider.rawValue)
+            }
+            snapshot.values["cloudflarePages"] = KeychainStore.read("cloudflarePages")
+            snapshot.values["pollinations"] = KeychainStore.read("pollinations")
+            snapshot.values["tavily"] = KeychainStore.read("tavily")
+            snapshot.values["remoteMCP"] = KeychainStore.read("remoteMCP")
+            return snapshot
+        }
+        func value(_ account: String) -> String { values[account] ?? "" }
+        func value(_ provider: ProviderID) -> String { values[provider.rawValue] ?? "" }
     }
+
+    private func applyKeySnapshot(_ snapshot: KeySnapshot) {
+        apinexKey = snapshot.value(.apinex); githubModelsKey = snapshot.value(.githubModels)
+        geminiKey = snapshot.value(.gemini); groqKey = snapshot.value(.groq); zaiKey = snapshot.value(.zai)
+        mistralKey = snapshot.value(.mistral); cloudflareKey = snapshot.value(.cloudflare)
+        cloudflarePagesKey = snapshot.value("cloudflarePages")
+        vercelKey = snapshot.value(.vercel); sambaNovaKey = snapshot.value(.sambaNova)
+        openRouterKey = snapshot.value(.openRouter); siliconKey = snapshot.value(.siliconFlow)
+        cerebrasKey = snapshot.value(.cerebras); deepseekKey = snapshot.value(.deepseek)
+        nvidiaKey = snapshot.value(.nvidiaNIM); customKey = snapshot.value(.custom)
+        pollinationsKey = snapshot.value("pollinations"); tavilyKey = snapshot.value("tavily")
+        mcpToken = snapshot.value("remoteMCP")
+    }
+
+    /// The credit/quota/MCP refreshes that used to run synchronously after loadKeys().
+    /// They now read the freshly loaded snapshot rather than @State, which is not
+    /// written yet at the moment the detached task returns.
+    private func startDeferredRefreshes(_ snapshot: KeySnapshot) {
+        let vercel = snapshot.value(.vercel).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !vercel.isEmpty {
+            Task {
+                await vercelCredits.refresh(key: vercel)
+                await modelCatalog.refresh(provider: .vercel, key: vercel, settings: settings)
+            }
+        }
+        let samba = snapshot.value(.sambaNova).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !samba.isEmpty {
+            Task { await modelCatalog.refresh(provider: .sambaNova, key: samba, settings: settings) }
+        }
+        if settings.mcpEnabled, !settings.mcpServerURL.isEmpty {
+            let token = snapshot.value("remoteMCP")
+            Task { await mcpCatalog.refresh(url: settings.mcpServerURL, token: token) }
+        }
+    }
+
     private func saveKeys() throws {
         try settings.setKey(apinexKey, for: .apinex); try settings.setKey(githubModelsKey, for: .githubModels)
         try settings.setKey(geminiKey, for: .gemini); try settings.setKey(groqKey, for: .groq); try settings.setKey(zaiKey, for: .zai)
         try settings.setKey(mistralKey, for: .mistral); try settings.setKey(cloudflareKey, for: .cloudflare)
         try settings.setKey(vercelKey, for: .vercel); try settings.setKey(sambaNovaKey, for: .sambaNova); try settings.setKey(openRouterKey, for: .openRouter)
         try settings.setKey(siliconKey, for: .siliconFlow); try settings.setKey(customKey, for: .custom); try settings.setPollinationsKey(pollinationsKey)
+        try settings.setKey(deepseekKey, for: .deepseek); try settings.setKey(cerebrasKey, for: .cerebras); try settings.setKey(nvidiaKey, for: .nvidiaNIM)
         try settings.setTavilyKey(tavilyKey); try settings.setCloudflarePagesToken(cloudflarePagesKey); try settings.setMCPToken(mcpToken)
     }
     private func testCloudflarePages() {
@@ -11289,9 +11341,12 @@ struct SettingsView: View {
         do { try saveKeys() } catch { present(error.localizedDescription); return }
         isTestingAll = true; saved = false
         let providers: [(ProviderID, String)] = [
+            (.apinex, apinexKey), (.githubModels, githubModelsKey),
             (.gemini, geminiKey), (.groq, groqKey), (.zai, zaiKey), (.mistral, mistralKey),
             (.cloudflare, cloudflareKey), (.vercel, vercelKey), (.sambaNova, sambaNovaKey),
-            (.openRouter, openRouterKey), (.siliconFlow, siliconKey), (.custom, customKey)
+            (.openRouter, openRouterKey), (.siliconFlow, siliconKey),
+            (.deepseek, deepseekKey), (.cerebras, cerebrasKey), (.nvidiaNIM, nvidiaKey),
+            (.custom, customKey)
         ]
         for (provider, _) in providers { checks[provider] = .checking }
         pollinationsCheck = KeyValidationService.shared.validatePollinationsFormat(key: pollinationsKey)
