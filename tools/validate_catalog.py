@@ -54,7 +54,6 @@ DEPRECATED: dict[str, str] = {
     "anthropic/claude-3-5-haiku-20241022": "anthropic/claude-haiku-4.5",
     "claude-3-5-sonnet-20241022": "anthropic/claude-sonnet-4.5",
     "claude-3-5-haiku-20241022": "anthropic/claude-haiku-4.5",
-    "gpt-4o": "openai/gpt-5.6-luna",
     "google/gemini-2.0-flash": "google/gemini-2.5-flash",
     "xai/grok-3": "xai/grok-4",
     # Never existed as a callable model
@@ -103,6 +102,8 @@ DEPRECATED_BY_PROVIDER: dict[str, dict[str, str]] = {
     "vercel": {
         "openai/gpt-4o-mini": "openai/gpt-5.6-luna",
         "meta/llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct",
+        # Live on GitHub Models, dead as a Vercel gateway alias.
+        "gpt-4o": "openai/gpt-5.6-luna",
     },
 }
 
@@ -178,6 +179,7 @@ SETTINGS_KEY_PROVIDER = {
     "nvidiaNIMModel": "nvidiaNIM",
     "antigravityModel": "antigravity",
     "customModel": "custom",
+    "githubModelsModel": "githubModels",
 }
 
 

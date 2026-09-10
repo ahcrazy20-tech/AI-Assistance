@@ -35,6 +35,38 @@
       "signupURL": "https://apinex.bond/register",
       "notes": "NEW in v3.0. OpenAI-compatible gateway, one key, 1M context on every free model. free/* models cost nothing. Live catalog: https://apinex.bond/api/public/models"
     },
+    "githubModels": {
+      "recommendedModels": [
+        "gpt-4.1",
+        "gpt-4.1-mini",
+        "gpt-4o",
+        "Meta-Llama-3.3-70B",
+        "Mistral-Small-3.1",
+        "DeepSeek-R1",
+        "Llama-4-Scout-17B-16E",
+        "o4-mini",
+        "o3-mini",
+        "Phi-4"
+      ],
+      "defaultModel": "gpt-4.1",
+      "fallbackChain": [
+        "gpt-4.1",
+        "gpt-4.1-mini",
+        "gpt-4o",
+        "Meta-Llama-3.3-70B",
+        "Mistral-Small-3.1",
+        "DeepSeek-R1"
+      ],
+      "free": true,
+      "requiresCard": false,
+      "status": "online",
+      "contextTokens": 1000000,
+      "vision": true,
+      "baseURL": "https://models.inference.ai.azure.com",
+      "modelsEndpoint": "https://models.inference.ai.azure.com/models",
+      "signupURL": "https://github.com/settings/tokens",
+      "notes": "NEW in v3.0. Permanently free, no card, OpenAI-compatible. Authenticates with an ordinary GitHub token. gpt-4.1 carries a 1M-token window; gpt-4.1-mini has the most generous allowance (15 RPM / 150 RPD). The o3-mini / o4-mini reasoning models are listed but kept out of the automatic fallback chain because they take different request parameters."
+    },
     "gemini": {
       "recommendedModels": [
         "gemini-3.8-flash",
@@ -223,7 +255,8 @@
       "notes": "$5/month renewing credit, zero token markup. claude-3.5-sonnet is no longer a gateway ID - use claude-sonnet-4.5 / claude-haiku-4.5.",
       "retiredModels": {
         "openai/gpt-4o-mini": "openai/gpt-5.6-luna",
-        "meta/llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct"
+        "meta/llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct",
+        "gpt-4o": "openai/gpt-5.6-luna"
       }
     },
     "sambaNova": {
@@ -423,7 +456,6 @@
     "anthropic/claude-3-5-haiku-20241022": "anthropic/claude-haiku-4.5",
     "claude-3-5-sonnet-20241022": "anthropic/claude-sonnet-4.5",
     "claude-3-5-haiku-20241022": "anthropic/claude-haiku-4.5",
-    "gpt-4o": "openai/gpt-5.6-luna",
     "google/gemini-2.0-flash": "google/gemini-2.5-flash",
     "openrouter/free": "nvidia/nemotron-3-ultra-550b-a55b:free",
     "meta/llama-3.1-70b-instruct": "meta/llama-3.3-70b-instruct",
@@ -435,6 +467,7 @@
   },
   "providerOrder": [
     "apinex",
+    "githubModels",
     "gemini",
     "groq",
     "zai",

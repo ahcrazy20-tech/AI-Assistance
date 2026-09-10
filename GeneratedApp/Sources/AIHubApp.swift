@@ -24,13 +24,14 @@ import BlakeHash
 // MARK: - Core models
 
 enum ProviderID: String, CaseIterable, Identifiable, Codable, Hashable {
-    case auto, apinex, gemini, groq, zai, mistral, cloudflare, vercel, sambaNova, openRouter, siliconFlow, cerebras, deepseek, nvidiaNIM, antigravity, custom
+    case auto, apinex, githubModels, gemini, groq, zai, mistral, cloudflare, vercel, sambaNova, openRouter, siliconFlow, cerebras, deepseek, nvidiaNIM, antigravity, custom
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .auto: return "Auto Fallback"
         case .apinex: return "APInex — 8 free models, 1M context"
+        case .githubModels: return "GitHub Models — free GPT-4.1, no card"
         case .gemini: return "Google Gemini — free Flash tier"
         case .groq: return "Groq — LPU inference"
         case .zai: return "Z.AI — free GLM Flash"
@@ -52,6 +53,7 @@ enum ProviderID: String, CaseIterable, Identifiable, Codable, Hashable {
         switch self {
         case .auto: return "Auto"
         case .apinex: return "APInex"
+        case .githubModels: return "GitHub"
         case .gemini: return "Gemini"
         case .groq: return "Groq"
         case .zai: return "Z.AI"
@@ -84,6 +86,7 @@ extension ProviderID {
         case .groq: return false // Groq vision limited
         case .sambaNova, .siliconFlow, .cerebras, .deepseek, .nvidiaNIM, .antigravity: return true
         case .apinex: return false // free/* models on APInex are text-only
+        case .githubModels: return true  // gpt-4.1 / gpt-4o accept image parts
         case .auto: return true
         }
     }
@@ -96,6 +99,7 @@ extension ProviderID {
     var defaultModel: String {
         switch self {
         case .apinex: return "free/gemini-3.8-flash"
+        case .githubModels: return "gpt-4.1"
         case .gemini: return "gemini-3.8-flash"
         case .groq: return "qwen/qwen3.6-27b"
         case .zai: return "glm-4.7-flash"
@@ -117,6 +121,7 @@ extension ProviderID {
         switch self {
         case .auto: return "arrow.triangle.branch"
         case .apinex: return "bolt.horizontal.circle.fill"
+        case .githubModels: return "chevron.left.forwardslash.chevron.right"
         case .gemini: return "sparkles"
         case .groq: return "bolt.fill"
         case .zai: return "z.circle.fill"
@@ -137,6 +142,7 @@ extension ProviderID {
         switch self {
         case .auto: return .primary
         case .apinex: return .mint
+        case .githubModels: return .primary
         case .gemini: return .blue
         case .groq: return .orange
         case .zai: return .purple
@@ -713,6 +719,7 @@ enum AppTab: Int, CaseIterable, Identifiable, Hashable {
 
     @Published var selectedProvider: ProviderID { didSet { defaults.set(selectedProvider.rawValue, forKey: "selectedProvider") } }
     @Published var apinexModel: String { didSet { defaults.set(apinexModel, forKey: "apinexModel") } }
+    @Published var githubModelsModel: String { didSet { defaults.set(githubModelsModel, forKey: "githubModelsModel") } }
     @Published var geminiModel: String { didSet { defaults.set(geminiModel, forKey: "geminiModel") } }
     @Published var groqModel: String { didSet { defaults.set(groqModel, forKey: "groqModel") } }
     @Published var zaiModel: String { didSet { defaults.set(zaiModel, forKey: "zaiModel") } }
@@ -752,6 +759,7 @@ enum AppTab: Int, CaseIterable, Identifiable, Hashable {
     @Published var researchMaxResults: Int { didSet { defaults.set(researchMaxResults, forKey: "researchMaxResults") } }
 
     @Published var apinexDailyLimit: Int { didSet { defaults.set(apinexDailyLimit, forKey: "apinexDailyLimit") } }
+    @Published var githubModelsDailyLimit: Int { didSet { defaults.set(githubModelsDailyLimit, forKey: "githubModelsDailyLimit") } }
     @Published var geminiDailyLimit: Int { didSet { defaults.set(geminiDailyLimit, forKey: "geminiDailyLimit") } }
     @Published var groqDailyLimit: Int { didSet { defaults.set(groqDailyLimit, forKey: "groqDailyLimit") } }
     @Published var zaiDailyLimit: Int { didSet { defaults.set(zaiDailyLimit, forKey: "zaiDailyLimit") } }
@@ -773,6 +781,7 @@ enum AppTab: Int, CaseIterable, Identifiable, Hashable {
         let store = UserDefaults.standard
         selectedProvider = ProviderID(rawValue: store.string(forKey: "selectedProvider") ?? "auto") ?? .auto
         apinexModel = store.string(forKey: "apinexModel") ?? "free/gemini-3.8-flash"
+        githubModelsModel = store.string(forKey: "githubModelsModel") ?? "gpt-4.1"
         geminiModel = store.string(forKey: "geminiModel") ?? "gemini-3.8-flash"
         groqModel = store.string(forKey: "groqModel") ?? "qwen/qwen3.6-27b"
         zaiModel = store.string(forKey: "zaiModel") ?? "glm-4.7-flash"
@@ -819,6 +828,7 @@ enum AppTab: Int, CaseIterable, Identifiable, Hashable {
         }
         // Daily budgets re-derived from the free-tier tables verified 2026-09-10.
         apinexDailyLimit = value("apinexDailyLimit", fallback: 500)
+        githubModelsDailyLimit = value("githubModelsDailyLimit", fallback: 50)   // 50 RPD on gpt-4.1
         geminiDailyLimit = value("geminiDailyLimit", fallback: 1000)   // ~1500 RPD on Flash
         groqDailyLimit = value("groqDailyLimit", fallback: 1000)       // 1000 RPD on gpt-oss-120b
         zaiDailyLimit = value("zaiDailyLimit", fallback: 1000)
@@ -861,6 +871,7 @@ enum AppTab: Int, CaseIterable, Identifiable, Hashable {
     func model(for provider: ProviderID, visual: Bool = false) -> String {
         switch provider {
         case .apinex: return apinexModel
+        case .githubModels: return githubModelsModel
         case .gemini: return geminiModel
         case .groq: return groqModel
         case .zai: return visual ? zaiVisionModel : zaiModel
@@ -882,6 +893,7 @@ enum AppTab: Int, CaseIterable, Identifiable, Hashable {
     func baseURL(for provider: ProviderID) -> String {
         switch provider {
         case .apinex: return "https://api.apinex.bond/v1"
+        case .githubModels: return "https://models.inference.ai.azure.com"
         case .groq: return "https://api.groq.com/openai/v1"
         case .zai: return "https://api.z.ai/api/paas/v4"
         case .mistral: return "https://api.mistral.ai/v1"
@@ -907,6 +919,7 @@ enum AppTab: Int, CaseIterable, Identifiable, Hashable {
     func dailyLimit(for provider: ProviderID) -> Int {
         switch provider {
         case .apinex: return apinexDailyLimit
+        case .githubModels: return githubModelsDailyLimit
         case .gemini: return geminiDailyLimit
         case .groq: return groqDailyLimit
         case .zai: return zaiDailyLimit
@@ -1520,6 +1533,38 @@ struct RemoteProviderConfig: Codable {
           "modelsEndpoint": "https://apinex.bond/api/public/models",
           "signupURL": "https://apinex.bond/register"
         },
+        "githubModels": {
+          "recommendedModels": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "Meta-Llama-3.3-70B",
+            "Mistral-Small-3.1",
+            "DeepSeek-R1",
+            "Llama-4-Scout-17B-16E",
+            "o4-mini",
+            "o3-mini",
+            "Phi-4"
+          ],
+          "defaultModel": "gpt-4.1",
+          "notes": "NEW in v3.0. Permanently free, no card, OpenAI-compatible. Authenticates with an ordinary GitHub token. gpt-4.1 carries a 1M-token window; gpt-4.1-mini has the most generous allowance (15 RPM / 150 RPD). The o3-mini / o4-mini reasoning models are listed but kept out of the automatic fallback chain because they take different request parameters.",
+          "fallbackChain": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "Meta-Llama-3.3-70B",
+            "Mistral-Small-3.1",
+            "DeepSeek-R1"
+          ],
+          "free": true,
+          "requiresCard": false,
+          "status": "online",
+          "contextTokens": 1000000,
+          "vision": true,
+          "baseURL": "https://models.inference.ai.azure.com",
+          "modelsEndpoint": "https://models.inference.ai.azure.com/models",
+          "signupURL": "https://github.com/settings/tokens"
+        },
         "gemini": {
           "recommendedModels": [
             "gemini-3.8-flash",
@@ -1701,7 +1746,8 @@ struct RemoteProviderConfig: Codable {
           ],
           "retiredModels": {
             "openai/gpt-4o-mini": "openai/gpt-5.6-luna",
-            "meta/llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct"
+            "meta/llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct",
+            "gpt-4o": "openai/gpt-5.6-luna"
           },
           "free": false,
           "requiresCard": true,
@@ -1908,7 +1954,6 @@ struct RemoteProviderConfig: Codable {
         "anthropic/claude-3-5-haiku-20241022": "anthropic/claude-haiku-4.5",
         "claude-3-5-sonnet-20241022": "anthropic/claude-sonnet-4.5",
         "claude-3-5-haiku-20241022": "anthropic/claude-haiku-4.5",
-        "gpt-4o": "openai/gpt-5.6-luna",
         "google/gemini-2.0-flash": "google/gemini-2.5-flash",
         "openrouter/free": "nvidia/nemotron-3-ultra-550b-a55b:free",
         "meta/llama-3.1-70b-instruct": "meta/llama-3.3-70b-instruct",
@@ -1920,6 +1965,7 @@ struct RemoteProviderConfig: Codable {
       },
       "providerOrder": [
         "apinex",
+        "githubModels",
         "gemini",
         "groq",
         "zai",
@@ -2007,7 +2053,6 @@ enum ModelCatalogDefaults {
         "glm-4-plus": "glm-4.7",
         "glm-4v-flash": "glm-4.6v-flash",
         "google/gemini-2.0-flash": "google/gemini-2.5-flash",
-        "gpt-4o": "openai/gpt-5.6-luna",
         "meta/llama-3.1-405b-instruct": "meta/llama-3.3-70b-instruct",
         "meta/llama-3.1-70b-instruct": "meta/llama-3.3-70b-instruct",
         "moonshotai/kimi-k2-instruct-0905": "moonshotai/kimi-k2-instruct",
@@ -2040,6 +2085,7 @@ enum ModelCatalogDefaults {
             "Qwen3-32B": "gpt-oss-120b"
         ],
         "vercel": [
+            "gpt-4o": "openai/gpt-5.6-luna",
             "meta/llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct",
             "openai/gpt-4o-mini": "openai/gpt-5.6-luna"
         ]
@@ -2082,6 +2128,14 @@ enum ModelCatalogDefaults {
             "gemini-3-flash-preview",
             "gemini-2.5-flash",
             "gemini-2.5-flash-lite"
+        ],
+        "githubModels": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "Meta-Llama-3.3-70B",
+            "Mistral-Small-3.1",
+            "DeepSeek-R1"
         ],
         "groq": [
             "qwen/qwen3.6-27b",
@@ -5560,20 +5614,20 @@ final class AIService {
         }
         if outputMode == .web {
             // Web work prioritizes long-context coding models; the web-specific health score learns independently.
-            return filtered([.vercel, .apinex, .gemini, .openRouter, .zai, .custom, .mistral, .sambaNova, .siliconFlow, .cloudflare, .groq, .cerebras, .deepseek, .nvidiaNIM])
+            return filtered([.vercel, .apinex, .githubModels, .gemini, .openRouter, .zai, .custom, .mistral, .sambaNova, .siliconFlow, .cloudflare, .groq, .cerebras, .deepseek, .nvidiaNIM])
         }
         if hasVisual || isDocument {
             // Native PDF and real vision providers lead; text-only providers (APInex, Groq)
             // stay late as OCR/text fallbacks rather than receiving image parts.
-            return filtered([.gemini, .vercel, .zai, .cloudflare, .openRouter, .mistral, .sambaNova, .custom, .groq, .siliconFlow, .cerebras, .deepseek, .nvidiaNIM, .apinex])
+            return filtered([.gemini, .vercel, .githubModels, .zai, .cloudflare, .openRouter, .mistral, .sambaNova, .custom, .groq, .siliconFlow, .cerebras, .deepseek, .nvidiaNIM, .apinex])
         }
         switch mode {
-        case .fast: return filtered([.groq, .apinex, .cerebras, .sambaNova, .zai, .gemini, .mistral, .cloudflare, .siliconFlow, .openRouter, .custom, .vercel, .deepseek, .nvidiaNIM])
-        case .smart: return filtered([.gemini, .apinex, .zai, .sambaNova, .groq, .cerebras, .mistral, .cloudflare, .siliconFlow, .openRouter, .custom, .vercel, .deepseek, .nvidiaNIM])
-        case .deep: return filtered([.vercel, .gemini, .apinex, .deepseek, .zai, .sambaNova, .mistral, .cloudflare, .openRouter, .groq, .siliconFlow, .custom, .cerebras, .nvidiaNIM])
-        case .research: return filtered([.gemini, .vercel, .apinex, .deepseek, .zai, .sambaNova, .mistral, .cloudflare, .openRouter, .groq, .siliconFlow, .custom, .cerebras, .nvidiaNIM])
-        case .agent: return filtered([.vercel, .apinex, .gemini, .deepseek, .zai, .sambaNova, .mistral, .cloudflare, .openRouter, .groq, .siliconFlow, .custom, .cerebras, .nvidiaNIM])
-        case .compare: return filtered([.vercel, .gemini, .apinex, .deepseek, .zai, .sambaNova, .mistral, .groq, .cloudflare, .openRouter, .siliconFlow, .custom, .cerebras, .nvidiaNIM])
+        case .fast: return filtered([.groq, .apinex, .githubModels, .cerebras, .sambaNova, .zai, .gemini, .mistral, .cloudflare, .siliconFlow, .openRouter, .custom, .vercel, .deepseek, .nvidiaNIM])
+        case .smart: return filtered([.gemini, .apinex, .githubModels, .zai, .sambaNova, .groq, .cerebras, .mistral, .cloudflare, .siliconFlow, .openRouter, .custom, .vercel, .deepseek, .nvidiaNIM])
+        case .deep: return filtered([.vercel, .gemini, .apinex, .githubModels, .deepseek, .zai, .sambaNova, .mistral, .cloudflare, .openRouter, .groq, .siliconFlow, .custom, .cerebras, .nvidiaNIM])
+        case .research: return filtered([.gemini, .vercel, .apinex, .githubModels, .deepseek, .zai, .sambaNova, .mistral, .cloudflare, .openRouter, .groq, .siliconFlow, .custom, .cerebras, .nvidiaNIM])
+        case .agent: return filtered([.vercel, .apinex, .githubModels, .gemini, .deepseek, .zai, .sambaNova, .mistral, .cloudflare, .openRouter, .groq, .siliconFlow, .custom, .cerebras, .nvidiaNIM])
+        case .compare: return filtered([.vercel, .gemini, .apinex, .githubModels, .deepseek, .zai, .sambaNova, .mistral, .groq, .cloudflare, .openRouter, .siliconFlow, .custom, .cerebras, .nvidiaNIM])
         }
     }
 
@@ -5588,6 +5642,7 @@ final class AIService {
         case .vercel: base = 120_000
         case .gemini: base = 140_000
         case .apinex: base = 180_000    // every free/* model carries a 1M window
+        case .githubModels: base = 150_000  // gpt-4.1 has a 1M window
         case .cerebras: base = 60_000
         case .deepseek: base = 160_000  // V4 Flash/Pro are 1M context
         case .nvidiaNIM: base = 80_000  // 100+ models
@@ -5606,6 +5661,7 @@ final class AIService {
         case .mistral, .siliconFlow, .sambaNova: base = 24_000
         case .gemini, .zai, .vercel, .openRouter, .custom: base = 42_000
         case .apinex: base = 60_000
+        case .githubModels: base = 50_000
         case .cerebras: base = 30_000
         case .deepseek: base = 50_000
         case .nvidiaNIM: base = 40_000
@@ -5626,6 +5682,7 @@ final class AIService {
             case .deepseek: return 12_288
             case .nvidiaNIM: return 8_192
             case .apinex: return 12_288
+            case .githubModels: return 12_288
             case .antigravity: return 4_096
             case .auto: return 6_144
             }
@@ -5642,6 +5699,7 @@ final class AIService {
         case .deepseek: return (mode == .deep || mode == .research || mode == .agent || mode == .compare) ? 8_192 : 6_144
         case .nvidiaNIM: return (mode == .deep || mode == .research || mode == .agent || mode == .compare) ? 6_144 : 4_096
         case .apinex: return (mode == .deep || mode == .research || mode == .agent || mode == .compare) ? 8_192 : 6_144
+        case .githubModels: return (mode == .deep || mode == .research || mode == .agent || mode == .compare) ? 8_192 : 4_096
         case .antigravity: return 2_048
         case .auto: return 3_072
         }
@@ -5962,7 +6020,8 @@ final class AIService {
         case .cerebras: return "APInex or Groq"
         case .deepseek: return "APInex or Gemini"
         case .nvidiaNIM: return "APInex or Gemini"
-        case .apinex: return "Gemini or OpenRouter"
+        case .apinex: return "Gemini or GitHub Models"
+        case .githubModels: return "APInex or Gemini"
         case .antigravity: return "APInex — Antigravity is retired"
         default: return "APInex or Groq"
         }
@@ -6172,6 +6231,7 @@ final class AIService {
         case .cerebras, .deepseek, .nvidiaNIM, .antigravity:
             return visualMarkers.contains(where: value.contains)
         case .apinex: return false  // the free/* catalogue is text-only
+        case .githubModels: return visualMarkers.contains(where: value.contains)
         case .auto, .gemini: return false
         }
     }
@@ -6393,7 +6453,7 @@ final class KeyValidationService {
         case .cloudflare:
             let account = settings.cloudflareAccountID.trimmingCharacters(in: .whitespacesAndNewlines)
             endpoint = "https://api.cloudflare.com/client/v4/accounts/\(account)/ai/models/search?per_page=1"
-        case .apinex, .groq, .zai, .mistral, .vercel, .sambaNova, .siliconFlow, .custom,
+        case .apinex, .githubModels, .groq, .zai, .mistral, .vercel, .sambaNova, .siliconFlow, .custom,
              .cerebras, .deepseek, .nvidiaNIM, .antigravity:
             var base = settings.baseURL(for: provider).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
             if base.hasSuffix("/chat/completions") { base = String(base.dropLast("/chat/completions".count)) }
@@ -10451,6 +10511,7 @@ struct ProviderControlCenterView: View {
                     case .cerebras: settings.cerebrasModel = new
                     case .deepseek: settings.deepseekModel = new
                     case .apinex: settings.apinexModel = new
+                    case .githubModels: settings.githubModelsModel = new
                     case .nvidiaNIM: settings.nvidiaNIMModel = new
                     case .antigravity: settings.antigravityModel = new
                     case .custom: settings.customModel = new
@@ -10528,6 +10589,7 @@ struct ProviderControlCenterView: View {
                                         case .cerebras: settings.cerebrasModel = model
                                         case .deepseek: settings.deepseekModel = model
                                         case .apinex: settings.apinexModel = model
+                                        case .githubModels: settings.githubModelsModel = model
                                         case .nvidiaNIM: settings.nvidiaNIMModel = model
                                         case .antigravity: settings.antigravityModel = model
                                         case .custom: settings.customModel = model
@@ -10586,6 +10648,7 @@ struct ProviderControlCenterView: View {
         case .groq: return "Very fast • conservative budgets • live health"
         case .mistral, .siliconFlow: return "OpenAI-compatible • vision when supported • live"
         case .apinex: return "8 free models • 1M context each • one key • live catalog"
+        case .githubModels: return "Free GPT-4.1 / GPT-4o • 1M context • uses your GitHub token"
         case .cerebras: return "Card required since Aug 2026 • ultra fast • live"
         case .deepseek: return "V4 Flash/Pro • 1M context • cheap • live"
         case .nvidiaNIM: return "100+ models • live catalog"
@@ -10732,6 +10795,7 @@ struct SettingsView: View {
     @EnvironmentObject private var remoteConfig: RemoteModelConfigService
     @ObservedObject private var router = ProviderPerformanceStore.shared
     @State private var apinexKey = ""
+    @State private var githubModelsKey = ""
     @State private var geminiKey = ""
     @State private var groqKey = ""
     @State private var zaiKey = ""
@@ -10812,8 +10876,23 @@ struct SettingsView: View {
     @ViewBuilder
     private var gatewaySettingsSections: some View {
         apinexSettingsSection
+        githubModelsSettingsSection
         vercelSettingsSection
         sambaNovaSettingsSection
+    }
+
+    private var githubModelsSettingsSection: some View {
+        Section("GitHub Models — free frontier models, no card") {
+            SecureField("GitHub token (classic or fine-grained)", text: $githubModelsKey).textInputAutocapitalization(.never).autocorrectionDisabled().focused($settingsInputFocused)
+            TextField("Model ID", text: $settings.githubModelsModel).textInputAutocapitalization(.never).autocorrectionDisabled().focused($settingsInputFocused)
+            Stepper(value: $settings.githubModelsDailyLimit, in: 1...20000, step: 5) { Text("Local daily limit: \(settings.githubModelsDailyLimit)") }
+            LabeledContent("Used today", value: "\(usage.byProvider[ProviderID.githubModels.rawValue] ?? 0)")
+            HStack { KeyStatusBadge(state: state(.githubModels)); Spacer(); Button("Test key") { test(.githubModels, key: githubModelsKey) }.disabled(state(.githubModels) == .checking) }
+            Text("Permanently free and OpenAI-compatible at https://models.inference.ai.azure.com. Paste any GitHub personal access token — a fine-grained token needs no extra scopes for inference. gpt-4.1 carries a 1M-token context window; gpt-4.1-mini has the most generous allowance at 15 RPM / 150 requests per day.")
+                .font(.caption).foregroundStyle(.secondary)
+            Link(destination: URL(string: "https://github.com/settings/tokens")!) { Label("Create a GitHub token", systemImage: "arrow.up.right.square") }
+            Link(destination: URL(string: "https://github.com/marketplace/models")!) { Label("Browse the model catalog", systemImage: "arrow.up.right.square") }
+        }
     }
 
     private var apinexSettingsSection: some View {
@@ -11143,7 +11222,7 @@ struct SettingsView: View {
 
     private func state(_ provider: ProviderID) -> KeyCheckState { checks[provider] ?? .unknown }
     private func loadKeys() {
-        apinexKey = settings.key(for: .apinex)
+        apinexKey = settings.key(for: .apinex); githubModelsKey = settings.key(for: .githubModels)
         geminiKey = settings.key(for: .gemini); groqKey = settings.key(for: .groq); zaiKey = settings.key(for: .zai)
         mistralKey = settings.key(for: .mistral); cloudflareKey = settings.key(for: .cloudflare); cloudflarePagesKey = settings.cloudflarePagesToken
         vercelKey = settings.key(for: .vercel); sambaNovaKey = settings.key(for: .sambaNova); openRouterKey = settings.key(for: .openRouter)
@@ -11152,7 +11231,7 @@ struct SettingsView: View {
         mcpToken = settings.mcpToken
     }
     private func saveKeys() throws {
-        try settings.setKey(apinexKey, for: .apinex)
+        try settings.setKey(apinexKey, for: .apinex); try settings.setKey(githubModelsKey, for: .githubModels)
         try settings.setKey(geminiKey, for: .gemini); try settings.setKey(groqKey, for: .groq); try settings.setKey(zaiKey, for: .zai)
         try settings.setKey(mistralKey, for: .mistral); try settings.setKey(cloudflareKey, for: .cloudflare)
         try settings.setKey(vercelKey, for: .vercel); try settings.setKey(sambaNovaKey, for: .sambaNova); try settings.setKey(openRouterKey, for: .openRouter)
